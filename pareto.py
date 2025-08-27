@@ -1,4 +1,5 @@
 import time, json, pickle
+from heapq import heappop, heappush, heapify
 import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -7,8 +8,11 @@ import logging
 logging.basicConfig(format='%(asctime)s |%(levelname)s: %(message)s', level=logging.INFO)
 
 class paretoCoverageCost():
+    '''
+    Define a class for coverage cost for n experts and single task
+    '''
 
-    def __init__(self, task, n_experts, costs, size_univ):
+    def __init__(self, task, n_experts, costs, size_univ, budget):
         '''
         Initialize instance with n experts and single task
         Each expert and task consists of a list of skills
@@ -17,12 +21,16 @@ class paretoCoverageCost():
             n_experts   : list of n experts; each expert is a list of skills
             costs       : cost of each expert
             size_univ   : number of distinct skills in the universe
+            budget      : knapsack budget
         '''
         self.task = task
+        self.task_skills = set(task)
+
         self.experts = n_experts
         self.m, self.n = size_univ, len(self.experts)
         self.costs = costs
-        logging.info("Initialized Pareto Coverage Cost Instance, Num Experts: {}".format(self.n))
+        self.B = budget
+        logging.info("Initialized Pareto Coverage-Cost Instance, Task:{}, Num Experts: {}".format(self.task, self.n))
 
 
     def getExpertCoverageAdd(self, cov_x, expert_index, curr_solution, curr_coverage):
@@ -30,11 +38,11 @@ class paretoCoverageCost():
         Helper function to get utility addition of new expert as per Demaine and Zadimoghaddam 2010
         '''
         expert_cov_add = len(curr_solution.union(self.experts[expert_index]).intersection(self.task))/len(self.task)
-        expert_ratio_add = min(cov_x, expert_cov_add) - (curr_coverage/self.costs[expert_index])
+        expert_ratio_add = (min(cov_x, expert_cov_add) - curr_coverage)/self.costs[expert_index]
         return expert_ratio_add
 
 
-    def submodularWithBudget(self, cov_x, cost_B, epsilon_val):
+    def submodularWithBudget(self, cov_x, epsilon_val):
         '''
         Greedy submodular maximization algorithm with knapsack budget from Demaine and Zadimoghaddam 2010
             If there exists an optimal solution with cost at most B and utility at least x, there is polytime
@@ -42,13 +50,13 @@ class paretoCoverageCost():
             and utility at least (1 - eps) x for any 0 < epsilon < 1
         ARGS:
             cov_x   : minimum desired coverage bound
-            cost_B  : total knapsack cost of experts
+        RETURN:
+            solution_expert_list    : List of chosen experts
         '''
-        logging.info("Initializing")
-
         solution_skills = set()
         solution_expert_list = []
         curr_coverage, curr_cost = 0, 0
+        coverage_list, cost_list = [0], [0]
 
         while curr_coverage < ((1 - epsilon_val)*cov_x):
             expert_max_ratio = 0
@@ -66,9 +74,123 @@ class paretoCoverageCost():
 
             #Add best expert to solution_skills and solution_expert_list
             solution_skills = solution_skills.union(set(best_expert))
-            curr_coverage = len(solution_skills.intersection(self.task))/len(self.task)
+            curr_coverage = len(solution_skills.intersection(self.task_skills))/len(self.task)
             solution_expert_list.append(best_expert)
             curr_cost += best_expert_cost
-            logging.info("Add expert: {} to solution, curr_coverage: {:.3f}, curr_cost: {}".format(best_expert, curr_coverage, curr_cost))
+            logging.info("Added expert: {} to solution, curr_coverage: {:.3f}, curr_cost: {}".format(best_expert, curr_coverage, curr_cost))
+
+            #Update incremental coverage and cost
+            coverage_list.append(curr_coverage)
+            cost_list.append(curr_cost)
+
+        logging.info("Final solution: {}, coverage: {}, cost: {}".format(solution_expert_list, curr_coverage, curr_cost))
+        self.plotParetoCurve(coverage_list, cost_list)
 
         return solution_expert_list
+    
+
+    def createExpertCoverageMaxHeap(self):
+        '''
+        Initialize self.maxHeap with expert-task coverages for each expert
+        '''
+        #Create max heap to store edge coverags
+        self.maxHeap = []
+        heapify(self.maxHeap)
+        
+        for i, E_i in enumerate(self.experts):
+            expert_skills = set(E_i)
+
+            #Compute expert-task coverage 
+            expert_coverage = len(expert_skills.intersection(self.task_skills))/len(self.task)
+            expert_weight = expert_coverage/self.costs[i]
+
+            #push to maxheap - heapItem stored -gain, expert index and cost
+            heapItem = (expert_weight*-1, i, self.costs[i])
+            heappush(self.maxHeap, heapItem)
+
+        return 
+    
+
+    def plainGreedy(self):
+        '''
+        Adapt Plain Greedy Algorithm from  Feldman, Nutov, Shoham 2021; Practical Budgeted Submodular Maximization
+        Run with input sets, self.experts instead of elements
+        '''
+        startTime = time.perf_counter()
+
+        #Solution skills and experts
+        solution_skills = set()
+        solution_experts = [] 
+
+        curr_coverage, curr_cost = 0, 0
+        coverage_list, cost_list = [0], [0]
+
+        #Create maxheap with coverages
+        self.createExpertCoverageMaxHeap()
+
+        #Assign experts greedily using max heap
+        #Check if there is an element with cost that fits in budget
+        while len(self.maxHeap) > 1 and (min(key[2] for key in self.maxHeap) <= (self.B - curr_cost)):
+            
+            #Pop best expert from maxHeap and compute marginal gain
+            top_expert_key = heappop(self.maxHeap)
+            top_expert_indx, top_expert_cost = top_expert_key[1], top_expert_key[2]
+            top_expert_skills = set(self.experts[top_expert_indx]) #Get the skills of the top expert
+
+            sol_with_top_expert = solution_skills.union(top_expert_skills)
+            coverage_with_top_expert = len(sol_with_top_expert.intersection(self.task_skills))/len(self.task)
+            top_expert_marginal_gain = (coverage_with_top_expert - curr_coverage)/top_expert_cost
+
+            #Check expert now on top - 2nd expert on heap
+            second_expert = self.maxHeap[0] 
+            second_expert_heap_gain = second_expert[0]*-1
+
+            #If marginal gain of top expert is better we add to solution
+            if top_expert_marginal_gain >= second_expert_heap_gain:
+                solution_skills = solution_skills.union(top_expert_skills)
+                solution_experts.append(self.experts[top_expert_indx])
+                curr_coverage = coverage_with_top_expert
+                curr_cost += top_expert_cost
+            
+            #Otherwise re-insert top expert into heap with updated marginal gain
+            else:
+                updated_top_expert = (top_expert_marginal_gain*-1, top_expert_indx, top_expert_cost)
+                heappush(self.maxHeap, updated_top_expert)
+
+
+        runTime = time.perf_counter() - startTime
+        logging.info("Plain Greedy runtime = {:.1f} seconds".format(runTime))
+
+        return solution_experts, solution_skills
+    
+    
+    def greedyPlus(self):
+        '''
+        Greedy Plus Algorithm from  Feldman, Nutov, Shoham 2021; Practical Budgeted Submodular Maximization
+        '''
+        return
+    
+    def oneGuessGreedyPlus(self):
+        '''
+        '''
+        return
+
+    def twoGuessPlainGreedy(self):
+        '''
+        '''
+        return
+
+    def plotParetoCurve(self, coverageList, costList):
+        '''
+        Plot coverage (y-axis) vs. cost (x-axis) through one run of algorithm
+        ARGS:
+            coverageList : List of coverages
+            costList     : List of costs
+        '''
+        plt.figure(figsize=(6, 4))
+        plt.plot(costList, coverageList, '*', alpha=0.7)
+        plt.title('Coverage vs. Cost')
+        plt.ylabel("Task Coverage")
+        plt.xlabel("Cost")
+        plt.grid(alpha=0.3)
+        plt.show()
