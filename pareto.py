@@ -114,7 +114,7 @@ class paretoCoverageCost():
     def plainGreedy(self):
         '''
         Adapt Plain Greedy Algorithm from  Feldman, Nutov, Shoham 2021; Practical Budgeted Submodular Maximization
-        Run with input sets, self.experts instead of elements
+        Run with input sets, self.experts instead of individual elements
         '''
         startTime = time.perf_counter()
 
@@ -130,7 +130,7 @@ class paretoCoverageCost():
 
         #Assign experts greedily using max heap
         #Check if there is an element with cost that fits in budget
-        while len(self.maxHeap) > 1 and (min(key[2] for key in self.maxHeap) <= (self.B - curr_cost)):
+        while len(self.maxHeap) > 1 and (min(key[2] for key in self.maxHeap) <= (self.B - curr_cost)) and (curr_coverage < 1):
             
             #Pop best expert from maxHeap and compute marginal gain
             top_expert_key = heappop(self.maxHeap)
@@ -151,34 +151,84 @@ class paretoCoverageCost():
                 solution_experts.append(self.experts[top_expert_indx])
                 curr_coverage = coverage_with_top_expert
                 curr_cost += top_expert_cost
+                logging.info("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
             
             #Otherwise re-insert top expert into heap with updated marginal gain
             else:
                 updated_top_expert = (top_expert_marginal_gain*-1, top_expert_indx, top_expert_cost)
                 heappush(self.maxHeap, updated_top_expert)
 
-
         runTime = time.perf_counter() - startTime
-        logging.info("Plain Greedy runtime = {:.1f} seconds".format(runTime))
+        logging.info("Plain Greedy Solution:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(solution_experts, curr_coverage, curr_cost, runTime))
 
-        return solution_experts, solution_skills
+        return solution_experts, solution_skills, curr_coverage, curr_cost
     
-    
+
     def greedyPlus(self):
         '''
         Greedy Plus Algorithm from  Feldman, Nutov, Shoham 2021; Practical Budgeted Submodular Maximization
+        Greedy returns the better solution among the output of Plain Greedy and the best feasible solution 
+        that can be obtained by combining any solution that Plain Greedy had at some iteration 
+        with a single expert.
         '''
+        startTime = time.perf_counter()
+
+        #Get plain greedy solution
+        sol_experts, sol_skills, best_coverage, best_cost = self.plainGreedy()
+
+        logging.info("=="*50)
+        best_experts_list, feasible_expert_list, feasible_expert_skills = [], [], set()
+        feasible_expert_cost = 0
+
+        #Loop over solution in each iteration of plain greedy
+        for i, expert_i in enumerate(sol_experts):
+            feasible_expert_list.append(expert_i)
+            feasible_expert_skills = feasible_expert_skills.union(set(expert_i))
+            feasible_expert_cost += self.costs[self.experts.index(expert_i)]
+            logging.info("Trying incremental solution:{}, cost:{}".format(feasible_expert_list, feasible_expert_cost))
+            
+            for j, E_j in enumerate(self.experts):
+                #If adding a single expert doesn't violate budget
+                if feasible_expert_cost + self.costs[j] <= self.B:
+                    #Compute coverage by adding expert to incremental solution
+                    added_expert_cov = len((feasible_expert_skills.union(set(E_j))).intersection(self.task_skills))/len(self.task)
+                    
+                    #If this solution is better than original solution, store it
+                    if added_expert_cov > best_coverage:
+                        best_experts_list = feasible_expert_list.copy()
+                        best_experts_list.append(E_j)
+                        best_coverage = added_expert_cov
+                        best_cost = feasible_expert_cost + self.costs[j]
+                        logging.info("New feasible solution yielded better coverage! {}, coverage={:.3f}, cost={}".format(best_experts_list,best_coverage,best_cost))
+        
+        #Return original solution if that is better
+        if len(best_experts_list) == 0:
+            logging.info("Original Plain Greedy Solution was best!")
+            best_experts_list = sol_experts
+
+        runTime = time.perf_counter() - startTime
+        logging.info("Greedy+ Solution:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(best_experts_list, best_coverage, best_cost, runTime))
+        
+        #Return new solution otherwise
+        return best_experts_list, sol_skills, best_coverage, best_cost
+    
+    
+    def twoGuessPlainGreedy(self):
+        '''
+        2-Guess Plain Greedy from  Feldman, Nutov, Shoham 2021; Practical Budgeted Submodular Maximization
+        '''
+        #Get expert pairs and store costs
+
+        
         return
+    
     
     def oneGuessGreedyPlus(self):
         '''
         '''
         return
 
-    def twoGuessPlainGreedy(self):
-        '''
-        '''
-        return
+    
 
     def plotParetoCurve(self, coverageList, costList):
         '''
