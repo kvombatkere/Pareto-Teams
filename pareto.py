@@ -30,7 +30,7 @@ class paretoCoverageCost():
         self.m, self.n = size_univ, len(self.experts)
         self.costs = costs
         self.B = budget
-        logging.info("Initialized Pareto Coverage-Cost Instance, Task:{}, Num Experts: {}".format(self.task, self.n))
+        logging.info("Initialized Pareto Coverage-Cost Instance, Task:{}, Num Experts:{}, Budget={}".format(self.task, self.n, self.B))
 
 
     def getExpertCoverageAdd(self, cov_x, expert_index, curr_solution, curr_coverage):
@@ -253,14 +253,15 @@ class paretoCoverageCost():
         allExpertPairs = {}
         #Get expert pairs and store union of skills and costs
         for i, expert_i in enumerate(self.experts):
-            for j, expert_j in enumerate(self.experts[i:]):
-                expert_pair_key = (i, j)
-                expert_pair_skills = set(expert_i).union(set(expert_j))
-                expert_pair_cost = self.costs[i] + self.costs[j]
+            for j, expert_j in enumerate(self.experts):
+                if i < j:
+                    expert_pair_key = (i, j)
+                    expert_pair_skills = set(expert_i).union(set(expert_j))
+                    expert_pair_cost = self.costs[i] + self.costs[j]
 
-                #Only add experts who cost less than the budget
-                if expert_pair_cost <= self.B:
-                    allExpertPairs[expert_pair_key] = [expert_pair_skills, expert_pair_cost]
+                    #Only add experts who cost less than the budget
+                    if expert_pair_cost <= self.B:
+                        allExpertPairs[expert_pair_key] = [expert_pair_skills, expert_pair_cost]
 
         logging.info("Created allExpertPairs with {} pairs".format(len(allExpertPairs)))
 
