@@ -147,11 +147,13 @@ class paretoCoverageCost():
 
             #If marginal gain of top expert is better we add to solution
             if top_expert_marginal_gain >= second_expert_heap_gain:
-                solution_skills = solution_skills.union(top_expert_skills)
-                solution_experts.append(self.experts[top_expert_indx])
-                curr_coverage = coverage_with_top_expert
-                curr_cost += top_expert_cost
-                logging.info("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
+                #Only add if expert is within budget
+                if top_expert_cost + curr_cost <= self.B:
+                    solution_skills = solution_skills.union(top_expert_skills)
+                    solution_experts.append(self.experts[top_expert_indx])
+                    curr_coverage = coverage_with_top_expert
+                    curr_cost += top_expert_cost
+                    logging.info("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
             
             #Otherwise re-insert top expert into heap with updated marginal gain
             else:
@@ -209,18 +211,134 @@ class paretoCoverageCost():
         runTime = time.perf_counter() - startTime
         logging.info("Greedy+ Solution:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(best_experts_list, best_coverage, best_cost, runTime))
         
-        #Return new solution otherwise
+        #Return solution
         return best_experts_list, sol_skills, best_coverage, best_cost
+    
+
+
+    def createmaxHeap2Guess(self, expert_pair_key, expert_pair_data):
+        '''
+        Initialize self.maxHeap2Guess with expert-task coverages for each expert
+        '''
+        #Create max heap to store coverages with respect to new objective function
+        self.maxHeap2Guess = []
+        heapify(self.maxHeap2Guess)
+
+        #Compute skills, cost and coverage of pair
+        expertPairSkills, expertPairCost = expert_pair_data[0], expert_pair_data[1]
+        expertPairCoverage = len(expertPairSkills.intersection(self.task_skills))/len(self.task)
+        
+        for i, E_i in enumerate(self.experts):
+            if i not in expert_pair_key and (self.costs[i] + expertPairCost <= self.B): #Only add new experts that fit budget
+                expert_skills = set(E_i)
+
+                #Compute marginal coverage of new expert
+                expert_coverage_total = len((expertPairSkills.union(expert_skills)).intersection(self.task_skills))/len(self.task)
+                expert_marginal_cov = expert_coverage_total - expertPairCoverage
+                expert_weight = expert_marginal_cov/self.costs[i]
+
+                #push to maxheap - heapItem stored -gain, expert index and cost
+                heapItem = (expert_weight*-1, i, self.costs[i])
+                heappush(self.maxHeap2Guess, heapItem)
+
+        return expertPairSkills, expertPairCoverage, expertPairCost
     
     
     def twoGuessPlainGreedy(self):
         '''
         2-Guess Plain Greedy from  Feldman, Nutov, Shoham 2021; Practical Budgeted Submodular Maximization
         '''
-        #Get expert pairs and store costs
+        startTime = time.perf_counter()
 
+        allExpertPairs = {}
+        #Get expert pairs and store union of skills and costs
+        for i, expert_i in enumerate(self.experts):
+            for j, expert_j in enumerate(self.experts[i:]):
+                expert_pair_key = (i, j)
+                expert_pair_skills = set(expert_i).union(set(expert_j))
+                expert_pair_cost = self.costs[i] + self.costs[j]
+
+                #Only add experts who cost less than the budget
+                if expert_pair_cost <= self.B:
+                    allExpertPairs[expert_pair_key] = [expert_pair_skills, expert_pair_cost]
+
+        logging.info("Created allExpertPairs with {} pairs".format(len(allExpertPairs)))
+
+        #Get best single expert solution
+        best_single_expert, best_single_cov, best_single_cost = set(), 0, 0
+        for i, expert_i in enumerate(self.experts):
+            if self.costs[i] <= self.B:
+                expert_i_cov = len(set(expert_i).intersection(self.task_skills))/len(self.task)
+                if expert_i_cov > best_single_cov:
+                    best_single_cov = expert_i_cov
+                    best_single_cost = self.costs[i]
+                    best_single_expert = set(expert_i)
+
+        #Keep track of all solutions and their costs
+        solutionDict = {}
+        best_sol_experts, best_sol_skills, best_coverage, best_cost = [], set(), 0, 0
+
+        #Run Plain Greedy for each pair
+        for pair_key, pair_data in allExpertPairs.items():
+            
+            #Create priority queue with all other experts for this run
+            #Initialize variables for this greedy run
+            solution_skills, curr_coverage, curr_cost = self.createmaxHeap2Guess(expert_pair_key=pair_key, expert_pair_data=pair_data)
+            solution_experts = [self.experts[pair_key[0]], self.experts[pair_key[1]]]
+
+            #Assign experts greedily using maxHeap2Guess
+            #Check if there is an element with cost that fits in budget
+            while len(self.maxHeap2Guess) > 1 and (min(key[2] for key in self.maxHeap2Guess) <= (self.B - curr_cost)) and (curr_coverage < 1):
+                
+                #Pop best expert from maxHeap2Guess and compute marginal gain
+                top_expert_key = heappop(self.maxHeap2Guess)
+                top_expert_indx, top_expert_cost = top_expert_key[1], top_expert_key[2]
+                top_expert_skills = set(self.experts[top_expert_indx]) #Get the skills of the top expert
+
+                sol_with_top_expert = solution_skills.union(top_expert_skills)
+                coverage_with_top_expert = len(sol_with_top_expert.intersection(self.task_skills))/len(self.task)
+                top_expert_marginal_gain = (coverage_with_top_expert - curr_coverage)/top_expert_cost
+
+                #Check expert now on top - 2nd expert on heap
+                second_expert = self.maxHeap2Guess[0] 
+                second_expert_heap_gain = second_expert[0]*-1
+
+                #If marginal gain of top expert is better we add to solution
+                if top_expert_marginal_gain >= second_expert_heap_gain:
+                    #Only add if expert is within budget
+                    if top_expert_cost + curr_cost <= self.B:
+                        solution_skills = solution_skills.union(top_expert_skills)
+                        solution_experts.append(self.experts[top_expert_indx])
+                        curr_coverage = coverage_with_top_expert
+                        curr_cost += top_expert_cost
+                        logging.debug("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
+                
+                #Otherwise re-insert top expert into heap with updated marginal gain
+                else:
+                    updated_top_expert = (top_expert_marginal_gain*-1, top_expert_indx, top_expert_cost)
+                    heappush(self.maxHeap2Guess, updated_top_expert)
+
+            
+            #Add solution to dict
+            logging.info("Computed Pair Solution for seed{}, experts:{}, coverage={:.3f}, cost={}".format(pair_key, solution_experts, curr_coverage, curr_cost))
+            solutionDict[pair_key] = {'experts':solution_experts, 'skills':solution_skills, 'coverage':curr_coverage, 'cost':curr_cost}
+            if curr_coverage > best_coverage:
+                best_coverage = curr_coverage
+                best_cost = curr_cost
+                best_sol_experts = solution_experts
+                best_sol_skills = solution_skills
+
+        #Compare with best single expert solution - if they are equivalent choose single
+        if best_single_cov >= best_coverage:
+            best_coverage = best_single_cov
+            best_cost = best_single_cost
+            best_sol_experts = list(best_single_expert)
+            best_sol_skills = best_single_expert
         
-        return
+        runTime = time.perf_counter() - startTime
+        logging.info("2-Guess Plain Greedy Solution:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(best_sol_experts, best_coverage, best_cost, runTime))
+
+        return best_sol_experts, best_sol_skills, best_coverage, best_cost
     
     
     def oneGuessGreedyPlus(self):
