@@ -153,7 +153,7 @@ class paretoCoverageCost():
                     solution_experts.append(self.experts[top_expert_indx])
                     curr_coverage = coverage_with_top_expert
                     curr_cost += top_expert_cost
-                    logging.info("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
+                    logging.debug("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
             
             #Otherwise re-insert top expert into heap with updated marginal gain
             else:
@@ -163,7 +163,7 @@ class paretoCoverageCost():
         runTime = time.perf_counter() - startTime
         logging.info("Plain Greedy Solution:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(solution_experts, curr_coverage, curr_cost, runTime))
 
-        return solution_experts, solution_skills, curr_coverage, curr_cost
+        return solution_experts, solution_skills, curr_coverage, curr_cost, runTime
     
 
     def greedyPlus(self):
@@ -176,7 +176,7 @@ class paretoCoverageCost():
         startTime = time.perf_counter()
 
         #Get plain greedy solution
-        sol_experts, sol_skills, best_coverage, best_cost = self.plainGreedy()
+        sol_experts, sol_skills, best_coverage, best_cost, pg_runtime = self.plainGreedy()
 
         logging.info("=="*50)
         best_experts_list, feasible_expert_list, feasible_expert_skills = [], [], set()
@@ -187,7 +187,7 @@ class paretoCoverageCost():
             feasible_expert_list.append(expert_i)
             feasible_expert_skills = feasible_expert_skills.union(set(expert_i))
             feasible_expert_cost += self.costs[self.experts.index(expert_i)]
-            logging.info("Trying incremental solution:{}, cost:{}".format(feasible_expert_list, feasible_expert_cost))
+            logging.debug("Trying incremental solution:{}, cost:{}".format(feasible_expert_list, feasible_expert_cost))
             
             for j, E_j in enumerate(self.experts):
                 #If adding a single expert doesn't violate budget
@@ -201,7 +201,7 @@ class paretoCoverageCost():
                         best_experts_list.append(E_j)
                         best_coverage = added_expert_cov
                         best_cost = feasible_expert_cost + self.costs[j]
-                        logging.info("New feasible solution yielded better coverage! {}, coverage={:.3f}, cost={}".format(best_experts_list,best_coverage,best_cost))
+                        logging.debug("New feasible solution yielded better coverage! {}, coverage={:.3f}, cost={}".format(best_experts_list,best_coverage,best_cost))
         
         #Return original solution if that is better
         if len(best_experts_list) == 0:
@@ -212,7 +212,7 @@ class paretoCoverageCost():
         logging.info("Greedy+ Solution:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(best_experts_list, best_coverage, best_cost, runTime))
         
         #Return solution
-        return best_experts_list, sol_skills, best_coverage, best_cost
+        return best_experts_list, sol_skills, best_coverage, best_cost, runTime
     
 
     def createmaxHeap2Guess(self, expert_pair_key, expert_pair_data):
@@ -319,7 +319,7 @@ class paretoCoverageCost():
                     heappush(self.maxHeap2Guess, updated_top_expert)
 
             #Add solution to dict
-            logging.info("Computed Pair Solution for seed{}, experts:{}, coverage={:.3f}, cost={}".format(pair_key, solution_experts, curr_coverage, curr_cost))
+            logging.debug("Computed Pair Solution for seed{}, experts:{}, coverage={:.3f}, cost={}".format(pair_key, solution_experts, curr_coverage, curr_cost))
             solutionDict[pair_key] = {'experts':solution_experts, 'skills':solution_skills, 'coverage':curr_coverage, 'cost':curr_cost}
             if curr_coverage > best_coverage:
                 best_coverage = curr_coverage
@@ -337,7 +337,7 @@ class paretoCoverageCost():
         runTime = time.perf_counter() - startTime
         logging.info("2-Guess Plain Greedy Solution:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(best_sol_experts, best_coverage, best_cost, runTime))
 
-        return best_sol_experts, best_sol_skills, best_coverage, best_cost
+        return best_sol_experts, best_sol_skills, best_coverage, best_cost, runTime
     
 
     def createmaxHeap1Guess(self, seed_expert, seed_expert_cost, seed_expert_index):
@@ -369,7 +369,7 @@ class paretoCoverageCost():
 
     def oneGuessGreedyPlus(self):
         '''
-        1-Guess Greedy+ from  Feldman, Nutov, Shoham 2021; Practical Budgeted Submodular Maximization
+        1-Guess Greedy+ from Feldman, Nutov, Shoham 2021; Practical Budgeted Submodular Maximization
         '''
         startTime = time.perf_counter()
 
@@ -415,7 +415,7 @@ class paretoCoverageCost():
                             solution_experts.append(self.experts[top_expert_indx])
                             curr_coverage = coverage_with_top_expert
                             curr_cost += top_expert_cost
-                            logging.info("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
+                            logging.debug("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
                     
                     #Otherwise re-insert top expert into heap with updated marginal gain
                     else:
@@ -433,7 +433,7 @@ class paretoCoverageCost():
                     feasible_expert_list.append(expert_i)
                     feasible_expert_skills = feasible_expert_skills.union(set(expert_i))
                     feasible_expert_cost += self.costs[self.experts.index(expert_i)]
-                    logging.info("Trying incremental solution:{}, cost:{}".format(feasible_expert_list, feasible_expert_cost))
+                    logging.debug("Trying incremental solution:{}, cost:{}".format(feasible_expert_list, feasible_expert_cost))
                     
                     for j, E_j in enumerate(self.experts):
                         #If adding a single expert doesn't violate budget
@@ -447,7 +447,7 @@ class paretoCoverageCost():
                                 seed_i_experts.append(E_j)
                                 seed_i_coverage = added_expert_cov
                                 seed_i_cost = feasible_expert_cost + self.costs[j]
-                                logging.info("New feasible seed solution yielded better coverage! {}, coverage={:.3f}, cost={}".format(seed_i_experts,
+                                logging.debug("New feasible seed solution yielded better coverage! {}, coverage={:.3f}, cost={}".format(seed_i_experts,
                                                                                                                                        seed_i_coverage, seed_i_cost))
                 
                 #Store best solution for seed i
@@ -463,7 +463,7 @@ class paretoCoverageCost():
         runTime = time.perf_counter() - startTime
         logging.info("1-Guess Greedy+ Solution:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(best_sol_experts, best_coverage, best_cost, runTime))
 
-        return best_sol_experts, best_sol_skills, best_coverage, best_cost 
+        return best_sol_experts, best_sol_skills, best_coverage, best_cost, runTime
 
     
 
