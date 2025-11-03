@@ -7,9 +7,9 @@ import networkx as nx
 import logging
 logging.basicConfig(format='%(asctime)s |%(levelname)s: %(message)s', level=logging.INFO)
 
-class paretoCoverageCost():
+class paretoKnapsack():
     '''
-    Define a class for coverage cost for n experts and single task
+    Define a class for coverage cost for n experts and single task, with knapsack cost
     '''
 
     def __init__(self, task, n_experts, costs, size_univ, budget):
@@ -30,7 +30,7 @@ class paretoCoverageCost():
         self.m, self.n = size_univ, len(self.experts)
         self.costs = costs
         self.B = budget
-        logging.info("Initialized Pareto Coverage-Cost Instance, Task:{}, Num Experts:{}, Budget={}".format(self.task, self.n, self.B))
+        logging.info("Initialized Pareto Coverage - Knapsack Cost Instance, Task:{}, Num Experts:{}, Budget={}".format(self.task, self.n, self.B))
 
 
     def getExpertCoverageAdd(self, cov_x, expert_index, curr_solution, curr_coverage):
