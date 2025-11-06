@@ -5,3 +5,4 @@
 *.swp
 *.pyc
 output/*
+datasets/pickled_data/imdb/imdb_graphMat_3.pkl
