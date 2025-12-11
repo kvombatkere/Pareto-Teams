@@ -249,6 +249,9 @@ class paretoKnapsack():
         '''
         startTime = time.perf_counter()
 
+        #Hashmap to track best coverage for each cost
+        cost_coverage_map = {}
+
         allExpertPairs = {}
         #Get expert pairs and store union of skills and costs
         for i, expert_i in enumerate(self.experts):
@@ -269,6 +272,10 @@ class paretoKnapsack():
         for i, expert_i in enumerate(self.experts):
             if self.costs[i] <= self.B:
                 expert_i_cov = len(set(expert_i).intersection(self.task_skills))/len(self.task)
+                #Update cost coverage map
+                if self.costs[i] not in cost_coverage_map or expert_i_cov > cost_coverage_map[self.costs[i]][0]:
+                    cost_coverage_map[self.costs[i]] = [expert_i_cov, list(expert_i)]
+
                 if expert_i_cov > best_single_cov:
                     best_single_cov = expert_i_cov
                     best_single_cost = self.costs[i]
@@ -285,6 +292,10 @@ class paretoKnapsack():
             #Initialize variables for this greedy run
             solution_skills, curr_coverage, curr_cost = self.createmaxHeap2Guess(expert_pair_key=pair_key, expert_pair_data=pair_data)
             solution_experts = [self.experts[pair_key[0]], self.experts[pair_key[1]]]
+            
+            #Update cost coverage map
+            if curr_cost not in cost_coverage_map or curr_coverage > cost_coverage_map[curr_cost][0]:
+                cost_coverage_map[curr_cost] = [curr_coverage, solution_experts.copy()]
 
             #Assign experts greedily using maxHeap2Guess
             #Check if there is an element with cost that fits in budget
@@ -311,6 +322,11 @@ class paretoKnapsack():
                         solution_experts.append(self.experts[top_expert_indx])
                         curr_coverage = coverage_with_top_expert
                         curr_cost += top_expert_cost
+
+                        #Update cost coverage map
+                        if curr_cost not in cost_coverage_map or curr_coverage > cost_coverage_map[curr_cost][0]:
+                            cost_coverage_map[curr_cost] = [curr_coverage, solution_experts.copy()]
+
                         logging.debug("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
                 
                 #Otherwise re-insert top expert into heap with updated marginal gain
@@ -337,7 +353,7 @@ class paretoKnapsack():
         runTime = time.perf_counter() - startTime
         logging.info("2-Guess Plain Greedy Solution:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(best_sol_experts, best_coverage, best_cost, runTime))
 
-        return best_sol_experts, best_sol_skills, best_coverage, best_cost, runTime
+        return best_sol_experts, best_sol_skills, best_coverage, best_cost, cost_coverage_map, runTime
     
 
     def createmaxHeap1Guess(self, seed_expert, seed_expert_cost, seed_expert_index):
