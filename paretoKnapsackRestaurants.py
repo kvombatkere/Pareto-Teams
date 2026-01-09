@@ -12,41 +12,73 @@ class paretoKnapsackRestaurants():
     Define a class for restaurant recommendations with knapsack cost
     '''
 
-    def __init__(self, n_items, costs, size_univ, budget):
+    def __init__(self, n_items, costs, simMatrix, budget):
         '''
-        Initialize instance with n experts and single task
-        Each expert and task consists of a list of skills
+        Initialize instance with n items, similarity matrix and knapsack budget
         ARGS:
-            task        : task to be accomplished;
-            n_experts   : list of n experts; each expert is a list of skills
-            costs       : cost of each expert
-            size_univ   : number of distinct skills in the universe
+            n_items   : list of n items; each item is a list of skills
+            costs       : cost of each item
+            simMatrix   : similarity matrix between items
             budget      : knapsack budget
         '''
         self.items = n_items
-        self.m, self.n = size_univ, len(self.items)
+        self.simMatrix = simMatrix
+        self.n = len(self.items)
         self.costs = costs
         self.B = budget
-        logging.debug("Initialized Pareto Restaurant - Knapsack Cost Instance, Num Experts:{}, Budget={}".format(self.n, self.B))
+        logging.info("Initialized Pareto Restaurant - Knapsack Cost Instance, Num Experts:{}, Budget={}".format(self.n, self.B))
 
 
-    def createExpertCoverageMaxHeap(self):
+    def computeSolutionObjective(self, solution_item_ids):
         '''
-        Initialize self.maxHeap with expert-task coverages for each expert
+        Compute objective value of current solution
+        ARGS:
+            solution_item_ids : list of item indices in current solution
+        RETURNS:
+            objective_value   : objective value of current solution
         '''
-        #Create max heap to store edge coverags
+        objective_value = 0
+
+        #Compute c
+        for i in range(self.n):
+            max_sim = 0
+            for item_id in solution_item_ids:
+                if self.simMatrix[i][item_id] > max_sim:
+                    max_sim = self.simMatrix[i][item_id]
+            objective_value += max_sim
+
+        return objective_value
+
+
+    def getItemMarginalGain(self, item_index, current_solution):
+        '''
+        Compute marginal gain of adding item_index to current_solution
+        ARGS:
+            item_index       : index of item to compute marginal gain for
+            current_solution : list of items in current solution
+        RETURNS:
+            marginal_gain   : marginal gain of adding item_index to current_solution
+        '''
+        marginal_gain = self.computeSolutionObjective(current_solution + [item_index]) - self.computeSolutionObjective(current_solution)
+        
+        return marginal_gain
+
+
+    def createItemMaxHeap(self):
+        '''
+        Initialize self.maxHeap with item similarities for each item
+        '''
+        #Create max heap to store marginal gains computed from similarity matrix
         self.maxHeap = []
         heapify(self.maxHeap)
         
-        for i, E_i in enumerate(self.experts):
-            expert_skills = set(E_i)
+        for e in range(self.n):
+            marginal_gain = 0
+            for i in range(self.n):
+                marginal_gain += self.simMatrix[i][e]
 
-            #Compute expert-task coverage 
-            expert_coverage = len(expert_skills.intersection(self.task_skills))/len(self.task)
-            expert_weight = expert_coverage/self.costs[i]
-
-            #push to maxheap - heapItem stored -gain, expert index and cost
-            heapItem = (expert_weight*-1, i, self.costs[i])
+            #push to maxheap - heapItem stored -gain, item index and cost
+            heapItem = (marginal_gain*-1, e, self.costs[e])
             heappush(self.maxHeap, heapItem)
 
         return 
@@ -59,52 +91,47 @@ class paretoKnapsackRestaurants():
         '''
         startTime = time.perf_counter()
 
-        #Solution skills and experts
-        solution_skills = set()
-        solution_experts = [] 
-
-        curr_coverage, curr_cost = 0, 0
-        coverage_list, cost_list = [0], [0]
+        #Solution items and current objective and cost
+        #Only track items by their indices
+        curr_solution_items = [] 
+        curr_objective, curr_cost = 0, 0
 
         #Create maxheap with coverages
-        self.createExpertCoverageMaxHeap()
+        self.createItemMaxHeap()
 
-        #Assign experts greedily using max heap
+        #Assign items greedily using max heap
         #Check if there is an element with cost that fits in budget
-        while len(self.maxHeap) > 1 and (min(key[2] for key in self.maxHeap) <= (self.B - curr_cost)) and (curr_coverage < 1):
+        while len(self.maxHeap) > 1 and (min(key[2] for key in self.maxHeap) <= (self.B - curr_cost)):
             
-            #Pop best expert from maxHeap and compute marginal gain
-            top_expert_key = heappop(self.maxHeap)
-            top_expert_indx, top_expert_cost = top_expert_key[1], top_expert_key[2]
-            top_expert_skills = set(self.experts[top_expert_indx]) #Get the skills of the top expert
+            #Pop best item from maxHeap and compute marginal gain
+            top_item_key = heappop(self.maxHeap)
+            top_item_indx, top_item_cost = top_item_key[1], top_item_key[2]
 
-            sol_with_top_expert = solution_skills.union(top_expert_skills)
-            coverage_with_top_expert = len(sol_with_top_expert.intersection(self.task_skills))/len(self.task)
-            top_expert_marginal_gain = (coverage_with_top_expert - curr_coverage)/top_expert_cost
+            objective_with_top_item = self.computeSolutionObjective(curr_solution_items + [top_item_indx])
+            top_item_marginal_gain = (objective_with_top_item - self.computeSolutionObjective(curr_solution_items))/top_item_cost
 
             #Check expert now on top - 2nd expert on heap
             second_expert = self.maxHeap[0] 
             second_expert_heap_gain = second_expert[0]*-1
 
-            #If marginal gain of top expert is better we add to solution
-            if top_expert_marginal_gain >= second_expert_heap_gain:
-                #Only add if expert is within budget
-                if top_expert_cost + curr_cost <= self.B:
-                    solution_skills = solution_skills.union(top_expert_skills)
-                    solution_experts.append(self.experts[top_expert_indx])
-                    curr_coverage = coverage_with_top_expert
-                    curr_cost += top_expert_cost
-                    logging.debug("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
+            #If marginal gain of top item is better we add to solution
+            if top_item_marginal_gain >= second_expert_heap_gain:
+                #Only add if item is within budget
+                if top_item_cost + curr_cost <= self.B:
+                    curr_solution_items.append(top_item_indx)
+                    curr_objective = objective_with_top_item
+                    curr_cost += top_item_cost
+                    logging.info("Adding item {}, curr_coverage={:.3f}, curr_cost={}".format(self.items[top_item_indx], curr_objective, curr_cost))
             
-            #Otherwise re-insert top expert into heap with updated marginal gain
+            #Otherwise re-insert top item into heap with updated marginal gain
             else:
-                updated_top_expert = (top_expert_marginal_gain*-1, top_expert_indx, top_expert_cost)
-                heappush(self.maxHeap, updated_top_expert)
+                updated_top_item = (top_item_marginal_gain*-1, top_item_indx, top_item_cost)
+                heappush(self.maxHeap, updated_top_item)
 
         runTime = time.perf_counter() - startTime
-        logging.debug("Plain Greedy Solution:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(solution_experts, curr_coverage, curr_cost, runTime))
+        logging.info("Plain Greedy Solution:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(curr_solution_items, curr_objective, curr_cost, runTime))
 
-        return solution_experts, solution_skills, curr_coverage, curr_cost, runTime
+        return curr_solution_items, curr_objective, curr_cost, runTime
     
 
     def greedyPlus(self):
