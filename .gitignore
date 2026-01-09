@@ -6,3 +6,6 @@
 *.pyc
 output/*
 datasets/pickled_data/imdb/imdb_graphMat_3.pkl
+datasets/raw_data/*
+datasets/jobs/*
+datasets/pickled_data/yelp/*
