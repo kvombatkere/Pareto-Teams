@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 import logging
-logging.basicConfig(format='%(asctime)s |%(levelname)s: %(message)s', level=logging.DEBUG)
+logging.basicConfig(format='%(asctime)s |%(levelname)s: %(message)s', level=logging.INFO)
 
 class paretoKnapsackRestaurants():
     '''
@@ -327,7 +327,7 @@ class paretoKnapsackRestaurants():
                 item_i_obj = self.computeSolutionObjective([i])
                 #Update cost objective map
                 if self.costs[i] not in cost_objective_map or item_i_obj > cost_objective_map[self.costs[i]][0]:
-                    cost_objective_map[self.costs[i]] = [item_i_obj, i]
+                    cost_objective_map[self.costs[i]] = [item_i_obj, [i]]
 
         #Run Greedy for each pair and track prefixes
         for pair_key, pair_cost in allItemPairs.items():
@@ -512,7 +512,7 @@ class paretoKnapsackRestaurants():
                 item_i_obj = self.computeSolutionObjective([i])
                 #Update cost objective map
                 if self.costs[i] not in cost_objective_map or item_i_obj > cost_objective_map[self.costs[i]][0]:
-                    cost_objective_map[self.costs[i]] = [item_i_obj, i]
+                    cost_objective_map[self.costs[i]] = [item_i_obj, [i]]
 
                 #Create priority queue with all other items for this run
                 #Initialize variables for this greedy run
