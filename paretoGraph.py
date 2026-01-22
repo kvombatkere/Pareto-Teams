@@ -33,80 +33,154 @@ class paretoGraph():
         self.B = budget
         logging.info("Initialized Pareto Coverage - Graph Cost Instance, Task:{}, Num Experts:{}, Budget={}".format(self.task, self.n, self.B))
 
-
+    
     def greedyThresholdDiameter(self):
-        '''
-        Greedy procedure that grows a ball (by radius) around every expert (as center)
-        and tracks the best task coverage achievable at each radius.
+        """
+        Greedy procedure that grows a metric ball around each expert (as center)
+        and records the best task coverage achievable at each radius.
 
         Returns:
-            radii                : sorted 1D numpy array of radii considered (includes 0)
-            best_coverages       : list of best coverage values (same length as radii)
-            best_centers         : list of center expert indices that achieved the best coverage
-            best_included_lists  : list of lists of expert indices included for the best center at each radius
+            radii                : sorted list of radii considered
+            best_coverages       : list of best coverage values
+            best_centers         : list of center indices
+            best_included_lists  : list of expert index lists
             runtime              : elapsed time in seconds
-        '''
+        """
         startTime = time.perf_counter()
 
-        #get unique pairwise costs
-        radii = np.insert(np.unique(self.pairwise_costs), 0, 0.0)  
-        best_coverages, best_centers, best_included_lists = [], [], []
+        n = self.n
+        task_size = len(self.task)
+        task_skills = self.task_skills
 
-        #Maintain sets of experts centered at each expert
-        expertBalls = {i: set(self.experts[i]) for i in range(self.n)}
-        expertBallsIndices = {i: [i] for i in range(self.n)}
+        # Map: radius -> (coverage, center, included_list)
+        best_at_radius = {}
 
-        # Precompute per-center neighbor order and corresponding distances (increasing)
-        neighbor_order = np.argsort(self.pairwise_costs, axis=1, kind='mergesort')   # shape (n,n)
-        neighbor_dists = np.take_along_axis(self.pairwise_costs, neighbor_order, axis=1)  
+        # Pre-sort neighbors for each center
+        neighbor_order = np.argsort(self.pairwise_costs, axis=1)
+        neighbor_dists = np.take_along_axis(
+            self.pairwise_costs, neighbor_order, axis=1
+        )
 
-        r_prev = 0
+        for center in range(n):
+            covered_skills = set()
+            included = []
 
-        # For each radius, evaluate ball around every expert and keep the best
-        for r in radii:
-            best_cov, best_center, best_included = -1, None, []
+            for idx in range(n):
+                u = neighbor_order[center, idx]
+                r = neighbor_dists[center, idx]
 
-            for center in range(self.n):
-                # find indices in the sorted neighbor_dists[center] that lie in (r_prev, r]
-                # prev_idx = count of distances <= r_prev; end_idx = count of distances <= r
-                prev_idx = np.searchsorted(neighbor_dists[center], r_prev, side='right')
-                end_idx = np.searchsorted(neighbor_dists[center], r, side='right')
+                # Add new expert
+                covered_skills |= set(self.experts[u])
+                included.append(u)
 
-                # neighbors added at this step: those between prev_idx (exclusive) and end_idx (inclusive)
-                if end_idx > prev_idx:
-                    added_indices = neighbor_order[center, prev_idx:end_idx].tolist()
-                else:
-                    added_indices = []
+                # Compute coverage
+                cov = len(covered_skills & task_skills) / task_size
 
-                # update ball sets and index lists incrementally
-                if added_indices:
-                    # union all skills of included experts
-                    expertBalls[center] = expertBalls[center].union(*(set(self.experts[j]) for j in added_indices))
-                    expertBallsIndices[center].extend(added_indices)
+                # Update best solution for this radius
+                if r not in best_at_radius or cov > best_at_radius[r][0]:
+                    best_at_radius[r] = (cov, center, included.copy())
 
-                # compute coverage 
-                cov = (len(expertBalls[center] & self.task_skills) / len(self.task))
-
-                if cov > best_cov:
-                    best_cov = cov
-                    best_center = center
-                    best_included = expertBallsIndices[center]
-
-                # early stop if full coverage reached
-                if best_cov >= 1.0:
+                # Optional early stop if full coverage achieved
+                if cov >= 1.0:
                     break
 
-            best_coverages.append(best_cov)
-            best_centers.append(best_center)
-            best_included_lists.append(best_included)
-            r_prev = r #update previous radius
-            
-            # early stop if full coverage reached
-            if best_cov >= 1.0:
-                radii = radii[:len(best_coverages)]  # trim radii to current length
-                break
+        # Pareto pruning (increasing radius)
+        radii = sorted(best_at_radius.keys())
+        best_coverages = []
+        best_centers = []
+        best_included_lists = []
+
+        best_so_far = -1
+        for r in radii:
+            cov, center, included = best_at_radius[r]
+            if cov > best_so_far:
+                best_so_far = cov
+                best_coverages.append(cov)
+                best_centers.append(center)
+                best_included_lists.append(included)
 
         runTime = time.perf_counter() - startTime
-        logging.info("GreedyThresholdDiameter finished: max_coverage={:.3f}, runtime={:.3f}s".format(max(best_coverages) if best_coverages else 0.0, runTime))
+        logging.info(
+            "GreedyThresholdDiameter finished: max_coverage={:.3f}, runtime={:.3f}s"
+            .format(max(best_coverages) if best_coverages else 0.0, runTime)
+        )
 
         return radii, best_coverages, best_centers, best_included_lists, runTime
+
+
+    # def greedyThresholdDiameter(self):
+    #     '''
+    #     Greedy procedure that grows a ball (by radius) around every expert (as center)
+    #     and tracks the best task coverage achievable at each radius.
+
+    #     Returns:
+    #         radii                : sorted 1D numpy array of radii considered (includes 0)
+    #         best_coverages       : list of best coverage values (same length as radii)
+    #         best_centers         : list of center expert indices that achieved the best coverage
+    #         best_included_lists  : list of lists of expert indices included for the best center at each radius
+    #         runtime              : elapsed time in seconds
+    #     '''
+    #     startTime = time.perf_counter()
+
+    #     #get unique pairwise costs
+    #     radii = np.insert(np.unique(self.pairwise_costs), 0, 0.0)  
+    #     best_coverages, best_centers, best_included_lists = [], [], []
+
+    #     #Maintain sets of experts centered at each expert
+    #     expertBalls = {i: set(self.experts[i]) for i in range(self.n)}
+    #     expertBallsIndices = {i: [i] for i in range(self.n)}
+
+    #     # Precompute per-center neighbor order and corresponding distances (increasing)
+    #     neighbor_order = np.argsort(self.pairwise_costs, axis=1, kind='mergesort')   # shape (n,n)
+    #     neighbor_dists = np.take_along_axis(self.pairwise_costs, neighbor_order, axis=1)  
+
+    #     r_prev = 0
+
+    #     # For each radius, evaluate ball around every expert and keep the best
+    #     for r in radii:
+    #         best_cov, best_center, best_included = -1, None, []
+
+    #         for center in range(self.n):
+    #             # find indices in the sorted neighbor_dists[center] that lie in (r_prev, r]
+    #             # prev_idx = count of distances <= r_prev; end_idx = count of distances <= r
+    #             prev_idx = np.searchsorted(neighbor_dists[center], r_prev, side='right')
+    #             end_idx = np.searchsorted(neighbor_dists[center], r, side='right')
+
+    #             # neighbors added at this step: those between prev_idx (exclusive) and end_idx (inclusive)
+    #             if end_idx > prev_idx:
+    #                 added_indices = neighbor_order[center, prev_idx:end_idx].tolist()
+    #             else:
+    #                 added_indices = []
+
+    #             # update ball sets and index lists incrementally
+    #             if added_indices:
+    #                 # union all skills of included experts
+    #                 expertBalls[center] = expertBalls[center].union(*(set(self.experts[j]) for j in added_indices))
+    #                 expertBallsIndices[center].extend(added_indices)
+
+    #             # compute coverage 
+    #             cov = (len(expertBalls[center] & self.task_skills) / len(self.task))
+
+    #             if cov > best_cov:
+    #                 best_cov = cov
+    #                 best_center = center
+    #                 best_included = expertBallsIndices[center]
+
+    #             # early stop if full coverage reached
+    #             if best_cov >= 1.0:
+    #                 break
+
+    #         best_coverages.append(best_cov)
+    #         best_centers.append(best_center)
+    #         best_included_lists.append(best_included)
+    #         r_prev = r #update previous radius
+            
+    #         # early stop if full coverage reached
+    #         if best_cov >= 1.0:
+    #             radii = radii[:len(best_coverages)]  # trim radii to current length
+    #             break
+
+    #     runTime = time.perf_counter() - startTime
+    #     logging.info("GreedyThresholdDiameter finished: max_coverage={:.3f}, runtime={:.3f}s".format(max(best_coverages) if best_coverages else 0.0, runTime))
+
+    #     return radii, best_coverages, best_centers, best_included_lists, runTime

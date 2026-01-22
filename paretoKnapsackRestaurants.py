@@ -194,17 +194,17 @@ class paretoKnapsackRestaurants():
         itemPairCost = item_pair_cost
         itemPairobjective = self.computeSolutionObjective(itemPairSol)
         
-        for i, E_i in enumerate(self.items):
+        for i, item_i in enumerate(self.items):
             if i not in item_pair_key and (self.costs[i] + itemPairCost <= self.B): #Only add new items that fit budget
                 #Compute marginal objective of new item
-                item_marginal_gain = self.getItemMarginalGain(i, itemPairSol)
+                item_marginal_gain = self.computeSolutionObjective(itemPairSol + [i]) - itemPairobjective
                 item_weight = item_marginal_gain/self.costs[i]
 
                 #push to maxheap - heapItem stored -gain, item index and cost
                 heapItem = (item_weight*-1, i, self.costs[i])
                 heappush(self.maxHeap2Guess, heapItem)
 
-        return itemPairobjective, itemPairCost
+        return itemPairobjective, itemPairCost, itemPairSol
     
 
     def twoGuessPlainGreedy(self):
@@ -247,8 +247,7 @@ class paretoKnapsackRestaurants():
             
             #Create priority queue with all other items for this run
             #Initialize variables for this greedy run
-            curr_objective, curr_cost = self.createmaxHeap2Guess(item_pair_key=pair_key, item_pair_cost=pair_cost)
-            curr_solution_items = [pair_key[0], pair_key[1]]
+            curr_objective, curr_cost, curr_solution_items = self.createmaxHeap2Guess(item_pair_key=pair_key, item_pair_cost=pair_cost)
 
             #Assign items greedily using maxHeap2Guess
             #Check if there is an element with cost that fits in budget
@@ -335,8 +334,7 @@ class paretoKnapsackRestaurants():
             
             #Create priority queue with all other items for this run
             #Initialize variables for this greedy run
-            curr_objective, curr_cost = self.createmaxHeap2Guess(item_pair_key=pair_key, item_pair_cost=pair_cost)
-            curr_solution_items = [pair_key[0], pair_key[1]]
+            curr_objective, curr_cost, curr_solution_items = self.createmaxHeap2Guess(item_pair_key=pair_key, item_pair_cost=pair_cost)
             
             #Update cost objective map
             if curr_cost not in cost_objective_map or curr_objective > cost_objective_map[curr_cost][0]:
@@ -368,6 +366,7 @@ class paretoKnapsackRestaurants():
                         #Update cost objective map
                         if curr_cost not in cost_objective_map or curr_objective > cost_objective_map[curr_cost][0]:
                             cost_objective_map[curr_cost] = [curr_objective, curr_solution_items.copy()]
+
                         logging.debug("Adding item {}, curr_objective={:.3f}, curr_cost={}".format(self.items[top_item_indx], curr_objective, curr_cost))
                 
                 #Otherwise re-insert top item into heap with updated marginal gain
@@ -386,36 +385,34 @@ class paretoKnapsackRestaurants():
                 logging.debug("Approx. Pareto Budget: {}, objective: {}, items: {}".format(b_prime, cost_objective_map[b_prime][0], cost_objective_map[b_prime][1]))
 
         runTime = time.perf_counter() - startTime
-        logging.debug("Prefix Pareto Greedy Runtime = {:.2f} seconds".format(runTime))
+        logging.debug("Prefix Pareto Greedy - 2 Guess Runtime = {:.2f} seconds".format(runTime))
 
         return prunedBudgets, prunedobjectives, cost_objective_map, runTime
     
 
-    def createmaxHeap1Guess(self, seed_itembest_single_item, seed_item_cost, seed_item_index):
+    def createmaxHeap1Guess(self, seed_item_index, seed_item_cost):
         '''
-        Initialize self.maxHeap1Guess with item-task objectives for each item that is not the seed
+        Initialize self.maxHeap1Guess with marginal objective gain for each item that is not the seed
         '''
         #Create max heap to store objectives with respect to new objective function
         self.maxHeap1Guess = []
         heapify(self.maxHeap1Guess)
 
-        #Compute skills, cost and objective of pair
-        itemobjective = len(set(seed_itembest_single_item).intersection(self.task_skills))/len(self.task)
+        #Compute objective with only seed item
+        item_objective = self.computeSolutionObjective([seed_item_index])
         
-        for i, E_i in enumerate(self.items):
+        for i, item_i in enumerate(self.items):
             if i != seed_item_index and (self.costs[i] + seed_item_cost <= self.B): #Only add new items that fit budget
-                item_skills = set(E_i)
 
                 #Compute marginal objective of new item
-                item_objective_total = len((set(seed_itembest_single_item).union(item_skills)).intersection(self.task_skills))/len(self.task)
-                item_marginal_obj = item_objective_total - itemobjective
+                item_marginal_obj = self.computeSolutionObjective([seed_item_index, i]) - item_objective
                 item_weight = item_marginal_obj/self.costs[i]
 
                 #push to maxheap - heapItem stored -gain, item index and cost
                 heapItem = (item_weight*-1, i, self.costs[i])
                 heappush(self.maxHeap1Guess, heapItem)
 
-        return itemobjective, seed_item_cost
+        return item_objective, seed_item_cost, [seed_item_index]
         
 
     def oneGuessGreedyPlus(self):
@@ -425,95 +422,79 @@ class paretoKnapsackRestaurants():
         startTime = time.perf_counter()
 
         #Keep track of all solutions and their costs
-        solutionDict = {}
-        best_sol_items, best_sol_skills, best_objective, best_cost = [], set(), 0, 0
+        best_sol_items, best_objective, best_cost = [], 0, 0
 
         #Iterate over all single item seeds
         for i, item_i in enumerate(self.items):
             if self.costs[i] <= self.B:
-                item_i_obj = len(set(item_i).intersection(self.task_skills))/len(self.task) 
-
                 #Create priority queue with all other items for this run
                 #Initialize variables for this greedy run
-                curr_objective, curr_cost = self.createmaxHeap1Guess(seed_itembest_single_item=item_i, 
-                                                                    seed_item_cost=self.costs[i], 
-                                                                    seed_item_index=i)
+                curr_objective, curr_cost, curr_solution_items = self.createmaxHeap1Guess(seed_item_index=i, 
+                                                                    seed_item_cost=self.costs[i])
                 
-                solution_skills, solution_items = set(item_i), [item_i]
-
                 #Assign items greedily using max heap
                 #Check if there is an element with cost that fits in budget
-                while len(self.maxHeap1Guess) > 1 and (min(key[2] for key in self.maxHeap1Guess) <= (self.B - curr_cost)) and (curr_objective < 1):
+                while len(self.maxHeap1Guess) > 1 and (min(key[2] for key in self.maxHeap1Guess) <= (self.B - curr_cost)):
                     
-                    #Pop best item from maxHeap1Guess and compute marginal gain
+                    #Pop best item from maxHeap and compute marginal gain
                     top_item_key = heappop(self.maxHeap1Guess)
                     top_item_indx, top_item_cost = top_item_key[1], top_item_key[2]
-                    top_item_skills = set(self.items[top_item_indx]) #Get the skills of the top item
 
-                    sol_with_top_itembest_single_item = solution_skills.union(top_item_skills)
-                    objective_with_top_itembest_single_item = len(sol_with_top_itembest_single_item.intersection(self.task_skills))/len(self.task)
-                    top_item_marginal_gain = (objective_with_top_itembest_single_item - curr_objective)/top_item_cost
+                    objective_with_top_item = self.computeSolutionObjective(curr_solution_items + [top_item_indx])
+                    top_item_marginal_gain = (objective_with_top_item - self.computeSolutionObjective(curr_solution_items))/top_item_cost
 
                     #Check item now on top - 2nd item on heap
-                    second_itembest_single_item = self.maxHeap1Guess[0] 
-                    second_item_heap_gain = second_itembest_single_item[0]*-1
+                    second_item = self.maxHeap1Guess[0] 
+                    second_item_heap_gain = second_item[0]*-1
 
                     #If marginal gain of top item is better we add to solution
                     if top_item_marginal_gain >= second_item_heap_gain:
                         #Only add if item is within budget
                         if top_item_cost + curr_cost <= self.B:
-                            solution_skills = solution_skills.union(top_item_skills)
-                            solution_items.append(self.items[top_item_indx])
-                            curr_objective = objective_with_top_itembest_single_item
+                            curr_solution_items.append(top_item_indx)
+                            curr_objective = objective_with_top_item
                             curr_cost += top_item_cost
                             logging.debug("Adding item {}, curr_objective={:.3f}, curr_cost={}".format(self.items[top_item_indx], curr_objective, curr_cost))
-                    
+                
                     #Otherwise re-insert top item into heap with updated marginal gain
                     else:
-                        updated_top_itembest_single_item = (top_item_marginal_gain*-1, top_item_indx, top_item_cost)
-                        heappush(self.maxHeap1Guess, updated_top_itembest_single_item)
+                        updated_top_item = (top_item_marginal_gain*-1, top_item_indx, top_item_cost)
+                        heappush(self.maxHeap1Guess, updated_top_item)
 
                 #Store results for run with seed i
-                seed_i_objective, seed_i_cost = curr_objective, curr_cost
-                seed_i_items, seed_i_skills = solution_items.copy(), solution_skills
+                seed_i_objective, seed_i_cost, seed_i_items = curr_objective, curr_cost, curr_solution_items.copy()
+                feasible_item_list, feasible_item_cost = [], 0
 
-                feasible_item_list, feasible_item_skills, feasible_item_cost = [], set(), 0
                 #Perform Greedy+ check - Loop over solution in each iteration of plain greedy
-                for i, item_i in enumerate(solution_items):
+                for i, item_i in enumerate(seed_i_items):
                     feasible_item_list.append(item_i)
-                    feasible_item_skills = feasible_item_skills.union(set(item_i))
-                    feasible_item_cost += self.costs[self.items.index(item_i)]
+                    feasible_item_cost += self.costs[item_i]
                     logging.debug("Trying incremental solution:{}, cost:{}".format(feasible_item_list, feasible_item_cost))
                     
-                    for j, E_j in enumerate(self.items):
+                    for j, item_j in enumerate(self.items):
                         #If adding a single item doesn't violate budget
                         if feasible_item_cost + self.costs[j] <= self.B:
                             #Compute objective by adding item to incremental solution
-                            added_item_obj = len((feasible_item_skills.union(set(E_j))).intersection(self.task_skills))/len(self.task)
+                            added_item_obj = self.computeSolutionObjective(feasible_item_list + [j])
                             
                             #If this solution is better than original solution, store it
-                            if added_item_obj > seed_i_objective:
+                            if added_item_obj > best_objective:
                                 seed_i_items = feasible_item_list.copy()
-                                seed_i_items.append(E_j)
+                                seed_i_items.append(j)
                                 seed_i_objective = added_item_obj
                                 seed_i_cost = feasible_item_cost + self.costs[j]
-                                logging.debug("New feasible seed solution yielded better objective! {}, objective={:.3f}, cost={}".format(seed_i_items,
-                                                                                                                                       seed_i_objective, seed_i_cost))
-                                
-                #Store best solution for seed i
-                logging.debug("Best solution for seed {}, items:{}, objective={:.3f}, cost={}".format(i, seed_i_items, seed_i_objective, seed_i_cost))
-                solutionDict[i] = {'items':seed_i_items, 'skills':seed_i_skills, 'objective':seed_i_objective, 'cost':seed_i_cost}
+                                logging.debug("New feasible solution yielded better objective! {}, objective={:.3f}, cost={}".format(seed_i_items,seed_i_objective,seed_i_cost))
+
                 #Keep track of best solution across all seeds
                 if seed_i_objective > best_objective:
+                    best_sol_items = seed_i_items
                     best_objective = seed_i_objective
                     best_cost = seed_i_cost
-                    best_sol_items = seed_i_items
-                    best_sol_skills = seed_i_skills
 
         runTime = time.perf_counter() - startTime
         logging.debug("1-Guess Greedy+ Solution:{}, objective:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(best_sol_items, best_objective, best_cost, runTime))
 
-        return best_sol_items, best_sol_skills, best_objective, best_cost, runTime
+        return best_sol_items, best_objective, best_cost, runTime
 
 
     def prefixParetoGreedy_1Guess(self):
@@ -528,53 +509,49 @@ class paretoKnapsackRestaurants():
         #Iterate over all single item seeds
         for i, item_i in enumerate(self.items):
             if self.costs[i] <= self.B:
-                item_i_obj = len(set(item_i).intersection(self.task_skills))/len(self.task) 
-
+                item_i_obj = self.computeSolutionObjective([i])
                 #Update cost objective map
                 if self.costs[i] not in cost_objective_map or item_i_obj > cost_objective_map[self.costs[i]][0]:
-                    cost_objective_map[self.costs[i]] = [item_i_obj, list(item_i)]
+                    cost_objective_map[self.costs[i]] = [item_i_obj, i]
 
                 #Create priority queue with all other items for this run
                 #Initialize variables for this greedy run
-                curr_objective, curr_cost = self.createmaxHeap1Guess(seed_itembest_single_item=item_i, seed_item_cost=self.costs[i], 
-                                                                    seed_item_index=i)
-                solution_skills, solution_items = set(item_i), [item_i]
-
+                curr_objective, curr_cost, curr_solution_items = self.createmaxHeap1Guess(seed_item_index=i, 
+                                                                    seed_item_cost=self.costs[i])
+                
                 #Assign items greedily using max heap
                 #Check if there is an element with cost that fits in budget
-                while len(self.maxHeap1Guess) > 1 and (min(key[2] for key in self.maxHeap1Guess) <= (self.B - curr_cost)) and (curr_objective < 1):
+                while len(self.maxHeap1Guess) > 1 and (min(key[2] for key in self.maxHeap1Guess) <= (self.B - curr_cost)):
                     
-                    #Pop best item from maxHeap1Guess and compute marginal gain
+                    #Pop best item from maxHeap and compute marginal gain
                     top_item_key = heappop(self.maxHeap1Guess)
                     top_item_indx, top_item_cost = top_item_key[1], top_item_key[2]
-                    top_item_skills = set(self.items[top_item_indx]) #Get the skills of the top item
 
-                    sol_with_top_itembest_single_item = solution_skills.union(top_item_skills)
-                    objective_with_top_itembest_single_item = len(sol_with_top_itembest_single_item.intersection(self.task_skills))/len(self.task)
-                    top_item_marginal_gain = (objective_with_top_itembest_single_item - curr_objective)/top_item_cost
+                    objective_with_top_item = self.computeSolutionObjective(curr_solution_items + [top_item_indx])
+                    top_item_marginal_gain = (objective_with_top_item - self.computeSolutionObjective(curr_solution_items))/top_item_cost
 
                     #Check item now on top - 2nd item on heap
-                    second_itembest_single_item = self.maxHeap1Guess[0] 
-                    second_item_heap_gain = second_itembest_single_item[0]*-1
+                    second_item = self.maxHeap1Guess[0] 
+                    second_item_heap_gain = second_item[0]*-1
 
                     #If marginal gain of top item is better we add to solution
                     if top_item_marginal_gain >= second_item_heap_gain:
                         #Only add if item is within budget
                         if top_item_cost + curr_cost <= self.B:
-                            solution_skills = solution_skills.union(top_item_skills)
-                            solution_items.append(self.items[top_item_indx])
-                            curr_objective = objective_with_top_itembest_single_item
+                            curr_solution_items.append(top_item_indx)
+                            curr_objective = objective_with_top_item
                             curr_cost += top_item_cost
-
+                        
                             #Update cost objective map
                             if curr_cost not in cost_objective_map or curr_objective > cost_objective_map[curr_cost][0]:
-                                cost_objective_map[curr_cost] = [curr_objective, solution_items.copy()]
+                                cost_objective_map[curr_cost] = [curr_objective, curr_solution_items.copy()]
+
                             logging.debug("Adding item {}, curr_objective={:.3f}, curr_cost={}".format(self.items[top_item_indx], curr_objective, curr_cost))
-                    
+                
                     #Otherwise re-insert top item into heap with updated marginal gain
                     else:
-                        updated_top_itembest_single_item = (top_item_marginal_gain*-1, top_item_indx, top_item_cost)
-                        heappush(self.maxHeap1Guess, updated_top_itembest_single_item)
+                        updated_top_item = (top_item_marginal_gain*-1, top_item_indx, top_item_cost)
+                        heappush(self.maxHeap1Guess, updated_top_item)
 
         #Prune cost_objective_map to only keep Pareto optimal solutions
         prunedBudgets, prunedobjectives = [], []
@@ -590,19 +567,3 @@ class paretoKnapsackRestaurants():
         logging.debug("Prefix Pareto Greedy - 1 Guess Runtime = {:.2f} seconds".format(runTime))
 
         return prunedBudgets, prunedobjectives, cost_objective_map, runTime
-    
-
-    def plotParetoCurve(self, objectiveList, costList):
-        '''
-        Plot objective (y-axis) vs. cost (x-axis) through one run of algorithm
-        ARGS:
-            objectiveList : List of objectives
-            costList     : List of costs
-        '''
-        plt.figure(figsize=(6, 4))
-        plt.plot(costList, objectiveList, '*', alpha=0.7)
-        plt.title('objective vs. Cost')
-        plt.ylabel("Task objective")
-        plt.xlabel("Cost")
-        plt.grid(alpha=0.3)
-        plt.show()
