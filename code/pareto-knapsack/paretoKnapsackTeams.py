@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import logging
 logging.basicConfig(format='%(asctime)s |%(levelname)s: %(message)s', level=logging.INFO)
 
-class paretoKnapsack():
+class paretoKnapsackTeams():
     '''
     Define a class for coverage cost for n experts and single task, with knapsack cost
     '''
