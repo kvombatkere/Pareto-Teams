@@ -1,8 +1,8 @@
-import time, json, pickle
+import time, pickle
 from heapq import heappop, heappush, heapify
 import numpy as np
+import matplotlib.cm as cm
 import matplotlib.pyplot as plt
-import networkx as nx
 
 import logging
 logging.basicConfig(format='%(asctime)s |%(levelname)s: %(message)s', level=logging.INFO)
@@ -636,17 +636,27 @@ class paretoKnapsack():
         return prunedBudgets, prunedCoverages, cost_coverage_map, runTime
     
 
-    def plotParetoCurve(self, coverageList, costList):
-        '''
-        Plot coverage (y-axis) vs. cost (x-axis) through one run of algorithm
-        ARGS:
-            coverageList : List of coverages
-            costList     : List of costs
-        '''
-        plt.figure(figsize=(6, 4))
-        plt.plot(costList, coverageList, '*', alpha=0.7)
-        plt.title('Coverage vs. Cost')
-        plt.ylabel("Task Coverage")
-        plt.xlabel("Cost")
-        plt.grid(alpha=0.3)
-        plt.show()
+def import_pickled_datasets(dataset_name, dataset_num):
+    '''
+    Code to quickly import final datasets for experiments
+    '''
+    data_path = '../../datasets/pickled_data/' + dataset_name + '/' + dataset_name + '_'
+    
+    #Import pickled data
+    with open(data_path + 'experts_{}.pkl'.format(dataset_num), "rb") as fp:
+        experts = pickle.load(fp)
+        logging.info("Imported {} experts, Num Experts: {}".format(dataset_name, len(experts)))
+
+    with open(data_path + 'tasks_{}.pkl'.format(dataset_num), "rb") as fp:
+        tasks = pickle.load(fp)
+        logging.info("Imported {} tasks, Num Tasks: {}".format(dataset_name, len(tasks)))
+
+    with open(data_path + 'costs_{}.pkl'.format(dataset_num), "rb") as fp:
+        costs_arr = pickle.load(fp)
+        logging.info("Imported {} costs, Num Costs: {}".format(dataset_name, len(costs_arr)))
+
+    with open(data_path + 'graphMat_{}.pkl'.format(dataset_num), "rb") as fp:
+        graphmat = pickle.load(fp)
+        logging.info("Imported {} graph matrix, Shape: {}\n".format(dataset_name, graphmat.shape))
+
+    return experts, tasks, costs_arr, graphmat

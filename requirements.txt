@@ -1,0 +1,4 @@
+numpy==2.1
+matplotlib==3.10
+networkx==3.4
+jupyter==1.1.0

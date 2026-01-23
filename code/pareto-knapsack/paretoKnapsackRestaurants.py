@@ -2,8 +2,7 @@ import time, json, pickle
 from heapq import heappop, heappush, heapify
 import numpy as np
 import matplotlib.pyplot as plt
-import networkx as nx
-
+import matplotlib.cm as cm
 import logging
 logging.basicConfig(format='%(asctime)s |%(levelname)s: %(message)s', level=logging.INFO)
 
