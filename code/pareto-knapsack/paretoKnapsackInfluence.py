@@ -3,6 +3,8 @@ from heapq import heappop, heappush, heapify
 import numpy as np
 import networkx as nx
 from collections import defaultdict
+import matplotlib.cm as cm
+import matplotlib.pyplot as plt
 import logging
 
 logging.basicConfig(format='%(asctime)s |%(levelname)s: %(message)s', level=logging.INFO)
@@ -128,54 +130,6 @@ class paretoKnapsackInfluence():
         influence_add = curr_influence + marginal_gain
         influence_ratio_add = (min(influence_x, influence_add) - curr_influence) / self.node_costs[self.nodes[node_index]]
         return influence_ratio_add
-
-
-    def submodularWithBudget(self, influence_x, epsilon_val):
-        '''
-        Greedy submodular maximization algorithm with knapsack budget from Demaine and Zadimoghaddam 2010
-            If there exists an optimal solution with cost at most B and utility at least x, there is polytime
-            algorithm that can find a collection of subsets of cost at most O(B log (1/eps)),
-            and utility at least (1 - eps) x for any 0 < epsilon < 1
-        ARGS:
-            influence_x   : minimum desired influence bound
-        RETURN:
-            solution_node_list    : List of chosen nodes
-        '''
-        startTime = time.perf_counter()
-        
-        solution_nodes = []
-        curr_influence, curr_cost = 0, 0
-        influence_list, cost_list = [0], [0]
-
-        while curr_influence < ((1 - epsilon_val)*influence_x):
-            node_max_ratio = 0
-            best_node = None
-
-            #Check all nodes, only consider those not in solution
-            for i, node in enumerate(self.nodes):
-                if node not in solution_nodes:
-                    node_ratio = self.getNodeInfluenceAdd(influence_x, i, solution_nodes, curr_influence)
-
-                    if node_ratio > node_max_ratio:
-                        best_node = node
-                        best_node_cost = self.node_costs[node]
-                        node_max_ratio = node_ratio
-
-            #Add best node to solution
-            solution_nodes.append(best_node)
-            curr_influence = self.compute_influence(solution_nodes)
-            curr_cost += best_node_cost
-            logging.info("Added node: {} to solution, curr_influence: {:.3f}, curr_cost: {}".format(best_node, curr_influence, curr_cost))
-
-            #Update incremental influence and cost
-            influence_list.append(curr_influence)
-            cost_list.append(curr_cost)
-
-        logging.info("Final solution: {}, influence: {}, cost: {}".format(solution_nodes, curr_influence, curr_cost))
-        self.plotParetoCurve(influence_list, cost_list)
-
-        runTime = time.perf_counter() - startTime
-        return solution_nodes, runTime
     
 
     def createNodeInfluenceMaxHeap(self):
@@ -416,97 +370,96 @@ class paretoKnapsackInfluence():
     def prefixParetoGreedy_2Guess(self):
         '''
         Prefix Pareto Greedy Algorithm - implemented as a variant of 2-Guess Plain Greedy
+        Tracks Pareto optimal influence-cost tradeoffs
         '''
         startTime = time.perf_counter()
 
-        #Hashmap to track best coverage for each cost
-        cost_coverage_map = {}
-        allExpertPairs = {}
+        #Dictionary to track best influence spread for each cost value
+        cost_influence_map = {}
+        allNodePairs = {}
 
-        #Get expert pairs and store union of skills and costs
-        for i, expert_i in enumerate(self.experts):
-            for j, expert_j in enumerate(self.experts):
+        #Get node pairs and store influence and costs
+        for i, node_i in enumerate(self.nodes):
+            for j, node_j in enumerate(self.nodes):
                 if i < j:
-                    expert_pair_key = (i, j)
-                    expert_pair_skills = set(expert_i).union(set(expert_j))
-                    expert_pair_cost = self.costs[i] + self.costs[j]
+                    node_pair_key = (i, j)
+                    node_pair_nodes = [node_i, node_j]
+                    node_pair_cost = self.node_costs[node_i] + self.node_costs[node_j]
 
-                    #Only add experts who cost less than the budget
-                    if expert_pair_cost <= self.B:
-                        allExpertPairs[expert_pair_key] = [expert_pair_skills, expert_pair_cost]
+                    #Only add nodes who cost less than the budget
+                    if node_pair_cost <= self.B:
+                        allNodePairs[node_pair_key] = [node_pair_nodes, node_pair_cost]
 
-        logging.debug("Created allExpertPairs with {} pairs".format(len(allExpertPairs)))
+        logging.debug("Created allNodePairs with {} pairs".format(len(allNodePairs)))
 
-        #Update single expert solutions
-        for i, expert_i in enumerate(self.experts):
-            if self.costs[i] <= self.B:
-                expert_i_cov = len(set(expert_i).intersection(self.task_skills))/len(self.task)
-                #Update cost coverage map
-                if self.costs[i] not in cost_coverage_map or expert_i_cov > cost_coverage_map[self.costs[i]][0]:
-                    cost_coverage_map[self.costs[i]] = [expert_i_cov, list(expert_i)]
+        #Track single node influence solutions
+        for i, node_i in enumerate(self.nodes):
+            if self.node_costs[node_i] <= self.B:
+                node_i_infl = self.compute_influence([node_i])
+                #Update influence map with single node solution
+                if self.node_costs[node_i] not in cost_influence_map or node_i_infl > cost_influence_map[self.node_costs[node_i]][0]:
+                    cost_influence_map[self.node_costs[node_i]] = [node_i_infl, [node_i]]
 
         #Run Greedy for each pair and track prefixes
-        for pair_key, pair_data in allExpertPairs.items():
+        for pair_key, pair_data in allNodePairs.items():
             
-            #Create priority queue with all other experts for this run
+            #Create priority queue with all other nodes for this run
             #Initialize variables for this greedy run
-            solution_skills, curr_coverage, curr_cost = self.createmaxHeap2Guess(expert_pair_key=pair_key, expert_pair_data=pair_data)
-            solution_experts = [self.experts[pair_key[0]], self.experts[pair_key[1]]]
+            curr_influence, curr_cost = self.createmaxHeap2Guess(node_pair_key=pair_key, node_pair_data=pair_data)
+            solution_nodes = pair_data[0].copy()
             
-            #Update cost coverage map
-            if curr_cost not in cost_coverage_map or curr_coverage > cost_coverage_map[curr_cost][0]:
-                cost_coverage_map[curr_cost] = [curr_coverage, solution_experts.copy()]
+            #Track initial pair influence
+            if curr_cost not in cost_influence_map or curr_influence > cost_influence_map[curr_cost][0]:
+                cost_influence_map[curr_cost] = [curr_influence, solution_nodes.copy()]
 
-            #Assign experts greedily using maxHeap2Guess
-            #Check if there is an element with cost that fits in budget
-            while len(self.maxHeap2Guess) > 1 and (min(key[2] for key in self.maxHeap2Guess) <= (self.B - curr_cost)) and (curr_coverage < 1):
+            #Assign nodes greedily using maxHeap2Guess
+            #Check if there is a node with cost that fits in budget
+            while len(self.maxHeap2Guess) > 1 and (min(key[2] for key in self.maxHeap2Guess) <= (self.B - curr_cost)):
                 
-                #Pop best expert from maxHeap2Guess and compute marginal gain
-                top_expert_key = heappop(self.maxHeap2Guess)
-                top_expert_indx, top_expert_cost = top_expert_key[1], top_expert_key[2]
-                top_expert_skills = set(self.experts[top_expert_indx]) #Get the skills of the top expert
+                #Pop best node from maxHeap2Guess and compute marginal gain
+                top_node_key = heappop(self.maxHeap2Guess)
+                top_node_indx, top_node_cost = top_node_key[1], top_node_key[2]
+                top_node = self.nodes[top_node_indx]
 
-                sol_with_top_expert = solution_skills.union(top_expert_skills)
-                coverage_with_top_expert = len(sol_with_top_expert.intersection(self.task_skills))/len(self.task)
-                top_expert_marginal_gain = (coverage_with_top_expert - curr_coverage)/top_expert_cost
+                influence_with_top_node = self.compute_influence(solution_nodes + [top_node])
+                top_node_marginal_gain = (influence_with_top_node - curr_influence) / top_node_cost
 
-                #Check expert now on top - 2nd expert on heap
-                second_expert = self.maxHeap2Guess[0] 
-                second_expert_heap_gain = second_expert[0]*-1
+                #Check node now on top - 2nd node on heap
+                second_node = self.maxHeap2Guess[0] 
+                second_node_heap_gain = second_node[0]*-1
 
-                #If marginal gain of top expert is better we add to solution
-                if top_expert_marginal_gain >= second_expert_heap_gain:
-                    #Only add if expert is within budget
-                    if top_expert_cost + curr_cost <= self.B:
-                        solution_skills = solution_skills.union(top_expert_skills)
-                        solution_experts.append(self.experts[top_expert_indx])
-                        curr_coverage = coverage_with_top_expert
-                        curr_cost += top_expert_cost
+                #If marginal gain of top node is better we add to solution
+                if top_node_marginal_gain >= second_node_heap_gain:
+                    #Only add if node is within budget
+                    if top_node_cost + curr_cost <= self.B:
+                        solution_nodes.append(top_node)
+                        curr_influence = influence_with_top_node
+                        curr_cost += top_node_cost
 
-                        #Update cost coverage map
-                        if curr_cost not in cost_coverage_map or curr_coverage > cost_coverage_map[curr_cost][0]:
-                            cost_coverage_map[curr_cost] = [curr_coverage, solution_experts.copy()]
-                        logging.debug("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
+                        #Track best influence for this cost
+                        if curr_cost not in cost_influence_map or curr_influence > cost_influence_map[curr_cost][0]:
+                            cost_influence_map[curr_cost] = [curr_influence, solution_nodes.copy()]
+                        logging.debug("Adding node {}, curr_influence={:.3f}, curr_cost={}".format(top_node, curr_influence, curr_cost))
                 
-                #Otherwise re-insert top expert into heap with updated marginal gain
+                #Otherwise re-insert top node into heap with updated marginal gain
                 else:
-                    updated_top_expert = (top_expert_marginal_gain*-1, top_expert_indx, top_expert_cost)
-                    heappush(self.maxHeap2Guess, updated_top_expert)
+                    updated_top_node = (top_node_marginal_gain*-1, top_node_indx, top_node_cost)
+                    heappush(self.maxHeap2Guess, updated_top_node)
 
-        #Prune cost_coverage_map to only keep Pareto optimal solutions
-        prunedBudgets, prunedCoverages = [], []
-        currentCov = 0
-        for b_prime in sorted(cost_coverage_map.keys()):
-            if cost_coverage_map[b_prime][0] > currentCov:
-                currentCov = cost_coverage_map[b_prime][0]
+        #Prune to only keep Pareto optimal influence-cost tradeoffs
+        prunedBudgets, prunedInfluences = [], []
+        currentInfl = 0
+        for b_prime in sorted(cost_influence_map.keys()):
+            if cost_influence_map[b_prime][0] > currentInfl:
+                currentInfl = cost_influence_map[b_prime][0]
                 prunedBudgets.append(b_prime)
-                prunedCoverages.append(currentCov)
-                logging.debug("Approx. Pareto Budget: {}, Coverage: {}, Experts: {}".format(b_prime, cost_coverage_map[b_prime][0], cost_coverage_map[b_prime][1]))
+                prunedInfluences.append(currentInfl)
+                logging.debug("Pareto Optimal - Cost: {}, Influence: {:.3f}, Nodes: {}".format(b_prime, cost_influence_map[b_prime][0], cost_influence_map[b_prime][1]))
 
         runTime = time.perf_counter() - startTime
         logging.debug("Prefix Pareto Greedy Runtime = {:.2f} seconds".format(runTime))
 
-        return prunedBudgets, prunedCoverages, cost_coverage_map, runTime
+        return prunedBudgets, prunedInfluences, cost_influence_map, runTime
     
 
     def createmaxHeap1Guess(self, seed_node, seed_node_cost, seed_node_index):
@@ -628,77 +581,76 @@ class paretoKnapsackInfluence():
     def prefixParetoGreedy_1Guess(self):
         '''
         Prefix Pareto Greedy Algorithm - implemented as a variant of 1-Guess Greedy
+        Tracks Pareto optimal influence-cost tradeoffs
         '''
         startTime = time.perf_counter()
 
-        #Hashmap to track best coverage for each cost
-        cost_coverage_map = {}
+        #Dictionary to track best influence spread for each cost value
+        cost_influence_map = {}
 
-        #Iterate over all single expert seeds
-        for i, expert_i in enumerate(self.experts):
-            if self.costs[i] <= self.B:
-                expert_i_cov = len(set(expert_i).intersection(self.task_skills))/len(self.task) 
+        #Iterate over all single node seeds
+        for i, node_i in enumerate(self.nodes):
+            if self.node_costs[node_i] <= self.B:
+                node_i_infl = self.compute_influence([node_i])
 
-                #Update cost coverage map
-                if self.costs[i] not in cost_coverage_map or expert_i_cov > cost_coverage_map[self.costs[i]][0]:
-                    cost_coverage_map[self.costs[i]] = [expert_i_cov, list(expert_i)]
+                #Track influence of single node solution
+                if self.node_costs[node_i] not in cost_influence_map or node_i_infl > cost_influence_map[self.node_costs[node_i]][0]:
+                    cost_influence_map[self.node_costs[node_i]] = [node_i_infl, [node_i]]
 
-                #Create priority queue with all other experts for this run
+                #Create priority queue with all other nodes for this run
                 #Initialize variables for this greedy run
-                curr_coverage, curr_cost = self.createmaxHeap1Guess(seed_expert=expert_i, seed_expert_cost=self.costs[i], 
-                                                                    seed_expert_index=i)
-                solution_skills, solution_experts = set(expert_i), [expert_i]
+                curr_influence, curr_cost = self.createmaxHeap1Guess(seed_node=node_i, seed_node_cost=self.node_costs[node_i], 
+                                                                    seed_node_index=i)
+                solution_nodes = [node_i]
 
-                #Assign experts greedily using max heap
-                #Check if there is an element with cost that fits in budget
-                while len(self.maxHeap1Guess) > 1 and (min(key[2] for key in self.maxHeap1Guess) <= (self.B - curr_cost)) and (curr_coverage < 1):
+                #Assign nodes greedily using max heap
+                #Check if there is a node with cost that fits in budget
+                while len(self.maxHeap1Guess) > 1 and (min(key[2] for key in self.maxHeap1Guess) <= (self.B - curr_cost)):
                     
-                    #Pop best expert from maxHeap1Guess and compute marginal gain
-                    top_expert_key = heappop(self.maxHeap1Guess)
-                    top_expert_indx, top_expert_cost = top_expert_key[1], top_expert_key[2]
-                    top_expert_skills = set(self.experts[top_expert_indx]) #Get the skills of the top expert
+                    #Pop best node from maxHeap1Guess and compute marginal gain
+                    top_node_key = heappop(self.maxHeap1Guess)
+                    top_node_indx, top_node_cost = top_node_key[1], top_node_key[2]
+                    top_node = self.nodes[top_node_indx]
 
-                    sol_with_top_expert = solution_skills.union(top_expert_skills)
-                    coverage_with_top_expert = len(sol_with_top_expert.intersection(self.task_skills))/len(self.task)
-                    top_expert_marginal_gain = (coverage_with_top_expert - curr_coverage)/top_expert_cost
+                    influence_with_top_node = self.compute_influence(solution_nodes + [top_node])
+                    top_node_marginal_gain = (influence_with_top_node - curr_influence) / top_node_cost
 
-                    #Check expert now on top - 2nd expert on heap
-                    second_expert = self.maxHeap1Guess[0] 
-                    second_expert_heap_gain = second_expert[0]*-1
+                    #Check node now on top - 2nd node on heap
+                    second_node = self.maxHeap1Guess[0] 
+                    second_node_heap_gain = second_node[0]*-1
 
-                    #If marginal gain of top expert is better we add to solution
-                    if top_expert_marginal_gain >= second_expert_heap_gain:
-                        #Only add if expert is within budget
-                        if top_expert_cost + curr_cost <= self.B:
-                            solution_skills = solution_skills.union(top_expert_skills)
-                            solution_experts.append(self.experts[top_expert_indx])
-                            curr_coverage = coverage_with_top_expert
-                            curr_cost += top_expert_cost
+                    #If marginal gain of top node is better we add to solution
+                    if top_node_marginal_gain >= second_node_heap_gain:
+                        #Only add if node is within budget
+                        if top_node_cost + curr_cost <= self.B:
+                            solution_nodes.append(top_node)
+                            curr_influence = influence_with_top_node
+                            curr_cost += top_node_cost
 
-                            #Update cost coverage map
-                            if curr_cost not in cost_coverage_map or curr_coverage > cost_coverage_map[curr_cost][0]:
-                                cost_coverage_map[curr_cost] = [curr_coverage, solution_experts.copy()]
-                            logging.debug("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
+                            #Track best influence for this cost
+                            if curr_cost not in cost_influence_map or curr_influence > cost_influence_map[curr_cost][0]:
+                                cost_influence_map[curr_cost] = [curr_influence, solution_nodes.copy()]
+                            logging.debug("Adding node {}, curr_influence={:.3f}, curr_cost={}".format(top_node, curr_influence, curr_cost))
                     
-                    #Otherwise re-insert top expert into heap with updated marginal gain
+                    #Otherwise re-insert top node into heap with updated marginal gain
                     else:
-                        updated_top_expert = (top_expert_marginal_gain*-1, top_expert_indx, top_expert_cost)
-                        heappush(self.maxHeap1Guess, updated_top_expert)
+                        updated_top_node = (top_node_marginal_gain*-1, top_node_indx, top_node_cost)
+                        heappush(self.maxHeap1Guess, updated_top_node)
 
-        #Prune cost_coverage_map to only keep Pareto optimal solutions
-        prunedBudgets, prunedCoverages = [], []
-        currentCov = 0
-        for b_prime in sorted(cost_coverage_map.keys()):
-            if cost_coverage_map[b_prime][0] > currentCov:
-                currentCov = cost_coverage_map[b_prime][0]
+        #Prune to only keep Pareto optimal influence-cost tradeoffs
+        prunedBudgets, prunedInfluences = [], []
+        currentInfl = 0
+        for b_prime in sorted(cost_influence_map.keys()):
+            if cost_influence_map[b_prime][0] > currentInfl:
+                currentInfl = cost_influence_map[b_prime][0]
                 prunedBudgets.append(b_prime)
-                prunedCoverages.append(currentCov)
-                logging.debug("Approx. Pareto Budget: {}, Coverage: {}, Experts: {}".format(b_prime, cost_coverage_map[b_prime][0], cost_coverage_map[b_prime][1]))
+                prunedInfluences.append(currentInfl)
+                logging.debug("Pareto Optimal - Cost: {}, Influence: {:.3f}, Nodes: {}".format(b_prime, cost_influence_map[b_prime][0], cost_influence_map[b_prime][1]))
 
         runTime = time.perf_counter() - startTime
         logging.debug("Prefix Pareto Greedy - 1 Guess Runtime = {:.2f} seconds".format(runTime))
 
-        return prunedBudgets, prunedCoverages, cost_coverage_map, runTime
+        return prunedBudgets, prunedInfluences, cost_influence_map, runTime
 
 
 def createGraph(data_path_file):
@@ -724,7 +676,7 @@ def createGraph(data_path_file):
 
     # Take only the largest connected component with size <= 5000
     if len(G_undir) > 0:
-        components = [cc for cc in nx.connected_components(G_undir) if len(cc) <= 20000]
+        components = [cc for cc in nx.connected_components(G_undir) if len(cc) <= 1200]
         if components:
             largest_cc = max(components, key=len)
         else:
@@ -750,8 +702,8 @@ def import_influence_data(data_path, node_costs=None):
     G, neighbors = createGraph(data_path)
     
     if node_costs is None:
-        # Default uniform costs
-        node_costs = {node: 1 for node in G.nodes()}
+        # Default costs: node degree in the influence graph
+        node_costs = {node: G.degree(node) for node in G.nodes()}
     
     logging.info("Imported influence graph with {} nodes and {} edges".format(G.number_of_nodes(), G.number_of_edges()))
     
