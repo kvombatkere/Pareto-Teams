@@ -1,197 +1,299 @@
 import time, pickle
 from heapq import heappop, heappush, heapify
 import numpy as np
-import matplotlib.cm as cm
-import matplotlib.pyplot as plt
-
+import networkx as nx
+from collections import defaultdict
 import logging
+
 logging.basicConfig(format='%(asctime)s |%(levelname)s: %(message)s', level=logging.INFO)
 
 class paretoCardinalityInfluence():
     '''
-    Define a class for coverage cost for n experts and single task, with cardinality cost
+    Define a class for influence maximization with cardinality cost
     '''
 
-    def __init__(self, task, n_experts, size_univ, k_max):
+    def __init__(self, G, node_costs, k_max, num_samples=35, graph_samples=None):
         '''
-        Initialize instance with n experts and single task
-        Each expert and task consists of a list of skills
+        Initialize instance with graph and node costs
         ARGS:
-            task        : task to be accomplished;
-            n_experts   : list of n experts; each expert is a list of skills
-            k           : cardinality constraint
-            size_univ   : number of distinct skills in the universe
+            G           : networkx graph
+            node_costs  : dict of node costs
+            k_max       : cardinality constraint
+            num_samples : number of graph samples for Monte Carlo
+            graph_samples: pre-computed graph samples (optional)
         '''
-        self.task = task
-        self.task_skills = set(task)
-
-        self.experts = n_experts
-        self.m, self.n = size_univ, len(self.experts)
+        self.G = G
+        self.node_costs = node_costs
         self.k_max = k_max
+        self.num_samples = num_samples
+        self.nodes = list(G.nodes())
+        self.n = len(self.nodes)
         self.kSolDict = {}
-        logging.info("Initialized Pareto Coverage - Cardinality Cost Instance, Task:{}, Num Experts:{}, k={}".format(self.task, self.n, k_max))
+        self.reachable_nodes_memory = {}
+        if graph_samples is not None:
+            self.graph_samples = graph_samples
+        else:
+            self.initialize_graph_samples()
+        logging.info("Initialized Pareto Influence - Cardinality Cost Instance, Num Nodes:{}, k={}".format(self.n, k_max))
 
+    def initialize_graph_samples(self):
+        '''
+        Initialize Monte Carlo samples of the graph under independent cascade model
+        '''
+        self.graph_samples = []
+        for i in range(self.num_samples):
+            G_sample = nx.Graph()
+            neighbors = defaultdict(set)
+            connected_components = defaultdict()
+            for u, v, data in self.G.edges(data=True):
+                success = np.random.uniform(0, 1)
+                if success < data['weight']:
+                    G_sample.add_edge(u, v)
+                    neighbors[u].add(v)
+                    neighbors[v].add(u)
+            for c in nx.connected_components(G_sample):
+                for node in c:
+                    connected_components[node] = c
+            self.graph_samples.append((G_sample, neighbors, connected_components))
 
-    def createExpertCoverageMaxHeap(self):
+    def submodular_func_caching(self, solution_elements, item_id):
+        """
+        Submodular function with caching
+        :param solution_elements: current solution nodes
+        :param item_id: nodes to add
+        :return: val, updated_solution_elements
+        """
+        if not solution_elements and not item_id:
+            return 0, []
+
+        spread = []
+        counter = 0
+
+        for G, neighbors, connected_components in self.graph_samples:
+            key = tuple(solution_elements)
+            if key in self.reachable_nodes_memory:
+                if counter in self.reachable_nodes_memory[key]:
+                    E_S = self.reachable_nodes_memory[key][counter]
+                    consider_nodes = item_id
+                else:
+                    E_S = set()
+                    consider_nodes = solution_elements + item_id
+            else:
+                E_S = set()
+                consider_nodes = solution_elements + item_id
+
+            reachable_nodes = []
+            for node in consider_nodes:
+                if node not in E_S:
+                    if node not in connected_components:
+                        continue
+                    reachable_nodes += connected_components[node]
+
+            reachable_nodes = list(E_S) + reachable_nodes
+            E_S = set(reachable_nodes)
+            spread.append(len(E_S))
+
+            new_key = tuple(solution_elements + item_id)
+            if new_key in self.reachable_nodes_memory:
+                if counter not in self.reachable_nodes_memory[new_key]:
+                    self.reachable_nodes_memory[new_key][counter] = E_S
+            else:
+                self.reachable_nodes_memory[new_key] = {}
+                self.reachable_nodes_memory[new_key][counter] = E_S
+
+            counter += 1
+
+        val = np.mean(spread)
+        return val, solution_elements + item_id
+
+    def createNodeInfluenceMaxHeap(self):
         '''
-        Initialize self.maxHeap with expert-task coverages for each expert
+        Initialize self.maxHeap with influence spreads for each node
         '''
-        #Create max heap to store edge coverags
         self.maxHeap = []
         heapify(self.maxHeap)
         
-        for i, E_i in enumerate(self.experts):
-            expert_skills = set(E_i)
-
-            #Compute expert-task coverage 
-            expert_coverage = len(expert_skills.intersection(self.task_skills))/len(self.task)
-
-            #push to maxheap - heapItem stored -gain, expert index and cost
-            heapItem = (expert_coverage*-1, i)
+        for node in self.nodes:
+            # Compute influence of single node
+            influence = self.compute_influence([node])
+            # push to maxheap - heapItem stored -influence, node
+            heapItem = (influence * -1, node)
             heappush(self.maxHeap, heapItem)
 
         return 
 
+    def compute_influence(self, nodes):
+        '''
+        Compute the expected influence spread of a set of nodes
+        '''
+        val, _ = self.submodular_func_caching(nodes, [])
+        return val
+
+
     def greedyCardinality(self):
         '''
-        Greedy Algorithm for Submodular Maximization
+        Greedy Algorithm for Submodular Maximization under cardinality constraint
         '''
         startTime = time.perf_counter()
 
-        #Solution skills and experts
-        solution_skills = set()
-        solution_experts = [] 
-
-        curr_coverage, coverage_list = 0, [0]
+        solution_nodes = []
+        curr_influence = 0
         k_val = 0
 
-        #Create maxheap with coverages
-        self.createExpertCoverageMaxHeap()
+        # Create maxheap with influences
+        self.createNodeInfluenceMaxHeap()
 
-        #Assign experts greedily using max heap until the solution has size k_max or coverage <= 1
-        while len(self.maxHeap) > 1 and (len(solution_experts) < self.k_max) and (curr_coverage < 1):
+        # Assign nodes greedily using max heap until the solution has size k_max
+        while len(self.maxHeap) > 0 and len(solution_nodes) < self.k_max:
             
-            #Pop best expert from maxHeap and compute marginal gain
-            top_expert_key = heappop(self.maxHeap)
-            top_expert_indx = top_expert_key[1]
-            top_expert_skills = set(self.experts[top_expert_indx]) #Get the skills of the top expert
+            # Pop best node from maxHeap and compute marginal gain
+            top_node_key = heappop(self.maxHeap)
+            top_node = top_node_key[1]
 
-            sol_with_top_expert = solution_skills.union(top_expert_skills)
-            coverage_with_top_expert = len(sol_with_top_expert.intersection(self.task_skills))/len(self.task)
-            top_expert_marginal_gain = (coverage_with_top_expert - curr_coverage)
+            marginal_gain = self.compute_marginal_gain(solution_nodes, top_node)
 
-            #Check expert now on top - 2nd expert on heap
-            second_expert = self.maxHeap[0] 
-            second_expert_heap_gain = second_expert[0]*-1
+            # Check node now on top - 2nd node on heap
+            if len(self.maxHeap) > 0:
+                second_node = self.maxHeap[0] 
+                second_influence = second_node[0] * -1
 
-            #If marginal gain of top expert is better we add to solution
-            if top_expert_marginal_gain >= second_expert_heap_gain:
-                k_val += 1
-                solution_skills = solution_skills.union(top_expert_skills)
-                solution_experts.append(self.experts[top_expert_indx])
-                curr_coverage = coverage_with_top_expert
-                self.kSolDict[k_val] = {"Experts": solution_experts, "Skills":solution_skills, "Coverage":curr_coverage}
-                logging.debug("k = {}, Adding expert {}, curr_coverage={:.3f}".format(k_val, self.experts[top_expert_indx], curr_coverage))
-        
-            #Otherwise re-insert top expert into heap with updated marginal gain
+                # If marginal gain of top node is better we add to solution
+                if marginal_gain >= second_influence:
+                    k_val += 1
+                    solution_nodes.append(top_node)
+                    curr_influence += marginal_gain
+                    self.kSolDict[k_val] = {"Nodes": solution_nodes.copy(), "Influence": curr_influence}
+                    logging.debug("k = {}, Adding node {}, curr_influence={:.3f}".format(k_val, top_node, curr_influence))
+            
+                # Otherwise re-insert top node into heap with updated marginal gain
+                else:
+                    updated_top_node = (marginal_gain * -1, top_node)
+                    heappush(self.maxHeap, updated_top_node)
             else:
-                updated_top_expert = (top_expert_marginal_gain*-1, top_expert_indx)
-                heappush(self.maxHeap, updated_top_expert)
+                # Last node
+                if marginal_gain > 0:
+                    k_val += 1
+                    solution_nodes.append(top_node)
+                    curr_influence += marginal_gain
+                    self.kSolDict[k_val] = {"Nodes": solution_nodes.copy(), "Influence": curr_influence}
 
         runTime = time.perf_counter() - startTime
-        logging.info("Cardinality Greedy Solution for k_max:{}, Coverage:{:.3f}, Runtime = {:.2f} seconds".format(solution_experts, curr_coverage, runTime))
+        logging.info("Cardinality Greedy Solution for k_max:{}, Influence:{:.3f}, Runtime = {:.2f} seconds".format(len(solution_nodes), curr_influence, runTime))
 
-        return solution_experts, solution_skills, curr_coverage, runTime
+        return solution_nodes, curr_influence, runTime
     
+    def compute_marginal_gain(self, current_nodes, new_node):
+        '''
+        Compute marginal gain of adding new_node to current_nodes
+        '''
+        prev_val, _ = self.submodular_func_caching(current_nodes, [])
+        new_val, _ = self.submodular_func_caching(current_nodes, [new_node])
+        return new_val - prev_val
+
     def top_k(self):
         '''
-        Top-k Algorithm: Select the top k experts from the heap without updates.
-        Marginal gains are computed w.r.t. the empty set (i.e., individual coverages).
+        Top-k Algorithm: Select the top k nodes from the heap without updates.
+        Influences are computed w.r.t. the empty set (i.e., individual influences).
         '''
         startTime = time.perf_counter()
 
-        #Solution skills and experts
-        solution_skills = set()
-        solution_experts = []
+        solution_nodes = []
 
-        #Create maxheap with coverages
-        self.createExpertCoverageMaxHeap()
+        # Create maxheap with influences
+        self.createNodeInfluenceMaxHeap()
 
-        #Select top k experts
+        # Select top k nodes
         for k_val in range(1, self.k_max + 1):
             if self.maxHeap:
-                top_expert_key = heappop(self.maxHeap)
-                top_expert_indx = top_expert_key[1]
-                top_expert_skills = set(self.experts[top_expert_indx])
+                top_node_key = heappop(self.maxHeap)
+                top_node = top_node_key[1]
 
-                solution_skills = solution_skills.union(top_expert_skills)
-                solution_experts.append(self.experts[top_expert_indx])
-                curr_coverage = len(solution_skills.intersection(self.task_skills)) / len(self.task)
-                self.kSolDict[k_val] = {"Experts": solution_experts.copy(), "Skills": solution_skills.copy(), "Coverage": curr_coverage}
-                logging.debug("k = {}, Adding top expert {}, curr_coverage={:.3f}".format(k_val, self.experts[top_expert_indx], curr_coverage))
+                solution_nodes.append(top_node)
+                curr_influence = self.compute_influence(solution_nodes)
+                self.kSolDict[k_val] = {"Nodes": solution_nodes.copy(), "Influence": curr_influence}
+                logging.debug("k = {}, Adding top node {}, curr_influence={:.3f}".format(k_val, top_node, curr_influence))
 
         runTime = time.perf_counter() - startTime
-        logging.info("Top-k Solution for k_max:{}, Coverage:{:.3f}, Runtime = {:.2f} seconds".format(solution_experts, curr_coverage, runTime))
+        logging.info("Top-k Solution for k_max:{}, Influence:{:.3f}, Runtime = {:.2f} seconds".format(len(solution_nodes), curr_influence, runTime))
 
-        return solution_experts, solution_skills, curr_coverage, runTime
-
+        return solution_nodes, curr_influence, runTime
 
     def random_selection(self):
         '''
-        Random Algorithm: Randomly select k distinct experts.
+        Random Algorithm: Randomly select k distinct nodes.
         '''
         startTime = time.perf_counter()
 
-        #Randomly select k_max distinct expert indices
+        # Randomly select k_max distinct node indices
         selected_indices = np.random.choice(self.n, size=self.k_max, replace=False)
 
-        #Solution skills and experts
-        solution_skills = set()
-        solution_experts = []
+        solution_nodes = [self.nodes[i] for i in selected_indices]
 
-        for idx in selected_indices:
-            expert_skills = set(self.experts[idx])
-            solution_skills = solution_skills.union(expert_skills)
-            solution_experts.append(self.experts[idx])
+        curr_influence = self.compute_influence(solution_nodes)
 
-        curr_coverage = len(solution_skills.intersection(self.task_skills)) / len(self.task)
-
-        #Populate kSolDict for consistency
+        # Populate kSolDict for consistency
         for k_val in range(1, self.k_max + 1):
-            partial_experts = solution_experts[:k_val]
-            partial_skills = set()
-            for exp in partial_experts:
-                partial_skills = partial_skills.union(set(exp))
-            partial_coverage = len(partial_skills.intersection(self.task_skills)) / len(self.task)
-            self.kSolDict[k_val] = {"Experts": partial_experts, "Skills": partial_skills, "Coverage": partial_coverage}
+            partial_nodes = solution_nodes[:k_val]
+            partial_influence = self.compute_influence(partial_nodes)
+            self.kSolDict[k_val] = {"Nodes": partial_nodes, "Influence": partial_influence}
 
         runTime = time.perf_counter() - startTime
-        logging.info("Random Selection Solution for k_max:{}, Coverage:{:.3f}, Runtime = {:.2f} seconds".format(solution_experts, curr_coverage, runTime))
+        logging.info("Random Selection Solution for k_max:{}, Influence:{:.3f}, Runtime = {:.2f} seconds".format(len(solution_nodes), curr_influence, runTime))
 
-        return solution_experts, solution_skills, curr_coverage, runTime
+        return solution_nodes, curr_influence, runTime
+
+def createGraph(data_path_file):
+    """
+    Create graph from influence dataset file, using only the largest connected component
+    """
+    edges = []
+    with open(data_path_file) as f:
+        next(f)
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                edge = [int(parts[0]), int(parts[1])]
+                edges.append(edge)
+
+    G = nx.DiGraph()
+    for edge in edges:
+        u, v = edge[0], edge[1]
+        G.add_edge(u, v)
+
+    # Convert to undirected for influence spread (assuming undirected propagation)
+    G_undir = G.to_undirected()
+
+    # Take only the largest connected component with size <= 5000
+    if len(G_undir) > 0:
+        components = [cc for cc in nx.connected_components(G_undir) if len(cc) <= 15000]
+        if components:
+            largest_cc = max(components, key=len)
+        else:
+            # If no component <=1200, take the largest overall
+            largest_cc = max(nx.connected_components(G_undir), key=len)
+        G_undir = G_undir.subgraph(largest_cc).copy()  # Create a copy of the subgraph
+
+    # Add default weights (can be adjusted)
+    for u, v in G_undir.edges():
+        G_undir[u][v]['weight'] = 0.1  # placeholder probability
+
+    neighbors = defaultdict(list)
+    for u, v in G_undir.edges():
+        neighbors[u].append(v)
+        neighbors[v].append(u)
     
+    return G_undir, neighbors
 
-def import_pickled_datasets(dataset_name, dataset_num):
+def import_influence_data(data_path, node_costs=None):
     '''
-    Code to quickly import final datasets for experiments
+    Import influence dataset
     '''
-    data_path = '../../datasets/pickled_data/' + dataset_name + '/' + dataset_name + '_'
+    G, neighbors = createGraph(data_path)
     
-    #Import pickled data
-    with open(data_path + 'experts_{}.pkl'.format(dataset_num), "rb") as fp:
-        experts = pickle.load(fp)
-        logging.info("Imported {} experts, Num Experts: {}".format(dataset_name, len(experts)))
-
-    with open(data_path + 'tasks_{}.pkl'.format(dataset_num), "rb") as fp:
-        tasks = pickle.load(fp)
-        logging.info("Imported {} tasks, Num Tasks: {}".format(dataset_name, len(tasks)))
-
-    with open(data_path + 'costs_{}.pkl'.format(dataset_num), "rb") as fp:
-        costs_arr = pickle.load(fp)
-        logging.info("Imported {} costs, Num Costs: {}".format(dataset_name, len(costs_arr)))
-
-    with open(data_path + 'graphMat_{}.pkl'.format(dataset_num), "rb") as fp:
-        graphmat = pickle.load(fp)
-        logging.info("Imported {} graph matrix, Shape: {}\n".format(dataset_name, graphmat.shape))
-
-    return experts, tasks, costs_arr, graphmat
+    if node_costs is None:
+        # Default uniform costs
+        node_costs = {node: 1 for node in G.nodes()}
+    
+    logging.info("Imported influence graph with {} nodes and {} edges".format(G.number_of_nodes(), G.number_of_edges()))
+    
+    return G, node_costs
