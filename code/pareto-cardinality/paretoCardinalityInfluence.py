@@ -43,18 +43,15 @@ class paretoCardinalityInfluence():
         self.graph_samples = []
         for i in range(self.num_samples):
             G_sample = nx.Graph()
-            neighbors = defaultdict(set)
             connected_components = defaultdict()
             for u, v, data in self.G.edges(data=True):
                 success = np.random.uniform(0, 1)
                 if success < data['weight']:
                     G_sample.add_edge(u, v)
-                    neighbors[u].add(v)
-                    neighbors[v].add(u)
             for c in nx.connected_components(G_sample):
                 for node in c:
                     connected_components[node] = c
-            self.graph_samples.append((G_sample, neighbors, connected_components))
+            self.graph_samples.append((G_sample, connected_components))
 
     def submodular_func_caching(self, solution_elements, item_id):
         """
@@ -69,7 +66,11 @@ class paretoCardinalityInfluence():
         spread = []
         counter = 0
 
-        for G, neighbors, connected_components in self.graph_samples:
+        for sample in self.graph_samples:
+            if len(sample) == 3:
+                G, _, connected_components = sample
+            else:
+                G, connected_components = sample
             key = tuple(solution_elements)
             if key in self.reachable_nodes_memory:
                 if counter in self.reachable_nodes_memory[key]:
@@ -279,18 +280,13 @@ def createGraph(data_path_file):
     for u, v in G_undir.edges():
         G_undir[u][v]['weight'] = 0.1  # placeholder probability
 
-    neighbors = defaultdict(list)
-    for u, v in G_undir.edges():
-        neighbors[u].append(v)
-        neighbors[v].append(u)
-    
-    return G_undir, neighbors
+    return G_undir
 
 def import_influence_data(data_path, node_costs=None):
     '''
     Import influence dataset
     '''
-    G, neighbors = createGraph(data_path)
+    G = createGraph(data_path)
     
     if node_costs is None:
         # Default uniform costs
