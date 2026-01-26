@@ -30,12 +30,13 @@ class paretoKnapsackInfluence():
         self.num_samples = num_samples
         self.nodes = list(G.nodes())
         self.n = len(self.nodes)
-        self.reachable_nodes_memory = {}
         if graph_samples is not None:
             self.graph_samples = graph_samples
         else:
             self.initialize_graph_samples()
+        
         logging.info("Initialized Pareto Influence - Knapsack Cost Instance, Num Nodes:{}, Budget={}".format(self.n, self.B))
+
 
     def initialize_graph_samples(self):
         '''
@@ -44,66 +45,38 @@ class paretoKnapsackInfluence():
         self.graph_samples = []
         for i in range(self.num_samples):
             G_sample = nx.Graph()
-            neighbors = defaultdict(set)
             connected_components = defaultdict()
             for u, v, data in self.G.edges(data=True):
                 success = np.random.uniform(0, 1)
                 if success < data['weight']:
                     G_sample.add_edge(u, v)
-                    neighbors[u].add(v)
-                    neighbors[v].add(u)
             for c in nx.connected_components(G_sample):
                 for node in c:
                     connected_components[node] = c
-            self.graph_samples.append((G_sample, neighbors, connected_components))
+            self.graph_samples.append(connected_components)
 
     def submodular_func_caching(self, solution_elements, item_id):
         """
-        Submodular function with caching
+        Submodular function without caching
         :param solution_elements: current solution nodes
         :param item_id: nodes to add
         :return: val, updated_solution_elements
         """
-        if not solution_elements and not item_id:
+        all_nodes = solution_elements + item_id
+        if not all_nodes:
             return 0, []
 
         spread = []
-        counter = 0
-
-        for G, neighbors, connected_components in self.graph_samples:
-            key = tuple(solution_elements)
-            if key in self.reachable_nodes_memory:
-                if counter in self.reachable_nodes_memory[key]:
-                    E_S = self.reachable_nodes_memory[key][counter]
-                    consider_nodes = item_id
-                else:
-                    E_S = set()
-                    consider_nodes = solution_elements + item_id
-            else:
-                E_S = set()
-                consider_nodes = solution_elements + item_id
-
-            reachable_nodes = []
-            for node in consider_nodes:
-                if node not in E_S:
-                    if node not in connected_components:
-                        continue
-                    reachable_nodes += connected_components[node]
-
-            reachable_nodes = list(E_S) + reachable_nodes
-            E_S = set(reachable_nodes)
-            spread.append(len(E_S))
-
-            new_key = tuple(solution_elements + item_id)
-            if new_key in self.reachable_nodes_memory:
-                if counter not in self.reachable_nodes_memory[new_key]:
-                    self.reachable_nodes_memory[new_key][counter] = E_S
-            else:
-                self.reachable_nodes_memory[new_key] = {}
-                self.reachable_nodes_memory[new_key][counter] = E_S
-
-            counter += 1
-
+        for sample in self.graph_samples:
+            connected_components = sample[2] if isinstance(sample, tuple) else sample
+            active_nodes = set()
+            for node in all_nodes:
+                component = connected_components.get(node)
+                if component is not None:
+                    active_nodes.update(component)
+            spread.append(len(active_nodes))
+            
+        # logging.info("Computed spread for solution {}, added item {}, spread_arr={}".format(solution_elements, item_id, spread))
         val = np.mean(spread)
         return val, solution_elements + item_id
 
@@ -118,9 +91,22 @@ class paretoKnapsackInfluence():
         '''
         Compute marginal gain of adding new_node to current_nodes
         '''
-        prev_val, _ = self.submodular_func_caching(current_nodes, [])
-        new_val, _ = self.submodular_func_caching(current_nodes, [new_node])
-        return new_val - prev_val
+        if not self.graph_samples:
+            return 0
+
+        marginal_gain = 0
+        for sample in self.graph_samples:
+            connected_components = sample[2] if isinstance(sample, tuple) else sample
+            active_nodes = set()
+            for node in current_nodes:
+                component = connected_components.get(node)
+                if component is not None:
+                    active_nodes.update(component)
+            component_new = connected_components.get(new_node)
+            if component_new is not None:
+                marginal_gain += len(component_new - active_nodes)
+
+        return marginal_gain / len(self.graph_samples)
 
     def getNodeInfluenceAdd(self, influence_x, node_index, curr_solution, curr_influence):
         '''
@@ -163,7 +149,6 @@ class paretoKnapsackInfluence():
         solution_nodes = []
 
         curr_influence, curr_cost = 0, 0
-        influence_list, cost_list = [0], [0]
 
         #Create maxheap with influence gains
         self.createNodeInfluenceMaxHeap()
@@ -630,7 +615,7 @@ class paretoKnapsackInfluence():
                             #Track best influence for this cost
                             if curr_cost not in cost_influence_map or curr_influence > cost_influence_map[curr_cost][0]:
                                 cost_influence_map[curr_cost] = [curr_influence, solution_nodes.copy()]
-                            logging.debug("Adding node {}, curr_influence={:.3f}, curr_cost={}".format(top_node, curr_influence, curr_cost))
+                            logging.info("Adding node {}, curr_influence={:.3f}, curr_cost={}".format(top_node, curr_influence, curr_cost))
                     
                     #Otherwise re-insert top node into heap with updated marginal gain
                     else:
@@ -676,7 +661,7 @@ def createGraph(data_path_file):
 
     # Take only the largest connected component with size <= 5000
     if len(G_undir) > 0:
-        components = [cc for cc in nx.connected_components(G_undir) if len(cc) <= 100]
+        components = [cc for cc in nx.connected_components(G_undir) if len(cc) <= 200]
         if components:
             largest_cc = max(components, key=len)
         else:
@@ -686,7 +671,7 @@ def createGraph(data_path_file):
 
     # Add default weights (can be adjusted)
     for u, v in G_undir.edges():
-        G_undir[u][v]['weight'] = 0.01  # placeholder probability
+        G_undir[u][v]['weight'] = 0.1  # placeholder probability
 
     neighbors = defaultdict(list)
     for u, v in G_undir.edges():

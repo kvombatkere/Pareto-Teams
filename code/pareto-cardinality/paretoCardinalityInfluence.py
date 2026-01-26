@@ -12,18 +12,16 @@ class paretoCardinalityInfluence():
     Define a class for influence maximization with cardinality cost
     '''
 
-    def __init__(self, G, node_costs, k_max, num_samples=35, graph_samples=None):
+    def __init__(self, G, k_max, num_samples=35, graph_samples=None):
         '''
         Initialize instance with graph and node costs
         ARGS:
             G           : networkx graph
-            node_costs  : dict of node costs
             k_max       : cardinality constraint
             num_samples : number of graph samples for Monte Carlo
             graph_samples: pre-computed graph samples (optional)
         '''
         self.G = G
-        self.node_costs = node_costs
         self.k_max = k_max
         self.num_samples = num_samples
         self.nodes = list(G.nodes())
@@ -55,54 +53,24 @@ class paretoCardinalityInfluence():
 
     def submodular_func_caching(self, solution_elements, item_id):
         """
-        Submodular function with caching
+        Submodular function without caching
         :param solution_elements: current solution nodes
         :param item_id: nodes to add
         :return: val, updated_solution_elements
         """
-        if not solution_elements and not item_id:
+        all_nodes = solution_elements + item_id
+        if not all_nodes:
             return 0, []
 
         spread = []
-        counter = 0
-
         for sample in self.graph_samples:
-            if len(sample) == 3:
-                G, _, connected_components = sample
-            else:
-                G, connected_components = sample
-            key = tuple(solution_elements)
-            if key in self.reachable_nodes_memory:
-                if counter in self.reachable_nodes_memory[key]:
-                    E_S = self.reachable_nodes_memory[key][counter]
-                    consider_nodes = item_id
-                else:
-                    E_S = set()
-                    consider_nodes = solution_elements + item_id
-            else:
-                E_S = set()
-                consider_nodes = solution_elements + item_id
-
-            reachable_nodes = []
-            for node in consider_nodes:
-                if node not in E_S:
-                    if node not in connected_components:
-                        continue
-                    reachable_nodes += connected_components[node]
-
-            reachable_nodes = list(E_S) + reachable_nodes
-            E_S = set(reachable_nodes)
-            spread.append(len(E_S))
-
-            new_key = tuple(solution_elements + item_id)
-            if new_key in self.reachable_nodes_memory:
-                if counter not in self.reachable_nodes_memory[new_key]:
-                    self.reachable_nodes_memory[new_key][counter] = E_S
-            else:
-                self.reachable_nodes_memory[new_key] = {}
-                self.reachable_nodes_memory[new_key][counter] = E_S
-
-            counter += 1
+            connected_components = sample[2] if isinstance(sample, tuple) else sample
+            active_nodes = set()
+            for node in all_nodes:
+                component = connected_components.get(node)
+                if component is not None:
+                    active_nodes.update(component)
+            spread.append(len(active_nodes))
 
         val = np.mean(spread)
         return val, solution_elements + item_id
@@ -187,9 +155,22 @@ class paretoCardinalityInfluence():
         '''
         Compute marginal gain of adding new_node to current_nodes
         '''
-        prev_val, _ = self.submodular_func_caching(current_nodes, [])
-        new_val, _ = self.submodular_func_caching(current_nodes, [new_node])
-        return new_val - prev_val
+        if not self.graph_samples:
+            return 0
+
+        marginal_gain = 0
+        for sample in self.graph_samples:
+            connected_components = sample[2] if isinstance(sample, tuple) else sample
+            active_nodes = set()
+            for node in current_nodes:
+                component = connected_components.get(node)
+                if component is not None:
+                    active_nodes.update(component)
+            component_new = connected_components.get(new_node)
+            if component_new is not None:
+                marginal_gain += len(component_new - active_nodes)
+
+        return marginal_gain / len(self.graph_samples)
 
     def top_k(self):
         '''
@@ -199,18 +180,22 @@ class paretoCardinalityInfluence():
         startTime = time.perf_counter()
 
         solution_nodes = []
+        curr_influence = 0
 
         # Create maxheap with influences
         self.createNodeInfluenceMaxHeap()
 
         # Select top k nodes
-        for k_val in range(1, self.k_max + 1):
-            if self.maxHeap:
-                top_node_key = heappop(self.maxHeap)
-                top_node = top_node_key[1]
+        k_val = 0
+        while self.maxHeap and k_val < self.k_max:
+            top_node_key = heappop(self.maxHeap)
+            top_node = top_node_key[1]
 
+            marginal_gain = self.compute_marginal_gain(solution_nodes, top_node)
+            if marginal_gain > 0:
+                k_val += 1
                 solution_nodes.append(top_node)
-                curr_influence = self.compute_influence(solution_nodes)
+                curr_influence += marginal_gain
                 self.kSolDict[k_val] = {"Nodes": solution_nodes.copy(), "Influence": curr_influence}
                 logging.debug("k = {}, Adding top node {}, curr_influence={:.3f}".format(k_val, top_node, curr_influence))
 
@@ -264,15 +249,14 @@ def createGraph(data_path_file):
     # Convert to undirected for influence spread (assuming undirected propagation)
     G_undir = G.to_undirected()
 
-    # Take the two largest connected components (prefer components with size <= 10000)
+    # Take the two largest connected components (prefer components with size <= 1000)
     if len(G_undir) > 0:
-        components = [cc for cc in nx.connected_components(G_undir) if len(cc) <= 10000]
+        components = [cc for cc in nx.connected_components(G_undir) if len(cc) <= 1000]
         if not components:
-            # If no component <=10000, use all components
             components = list(nx.connected_components(G_undir))
 
         components_sorted = sorted(components, key=len, reverse=True)
-        top_components = components_sorted[:2]
+        top_components = components_sorted[:10]
         selected_nodes = set().union(*top_components)
         G_undir = G_undir.subgraph(selected_nodes).copy()  # Create a copy of the subgraph
 
@@ -282,16 +266,12 @@ def createGraph(data_path_file):
 
     return G_undir
 
-def import_influence_data(data_path, node_costs=None):
+def import_influence_data(data_path):
     '''
     Import influence dataset
     '''
     G = createGraph(data_path)
-    
-    if node_costs is None:
-        # Default uniform costs
-        node_costs = {node: 1 for node in G.nodes()}
-    
+
     logging.info("Imported influence graph with {} nodes and {} edges".format(G.number_of_nodes(), G.number_of_edges()))
-    
-    return G, node_costs
+
+    return G
