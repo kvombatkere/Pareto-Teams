@@ -118,7 +118,7 @@ class paretoCardinalityRestaurants():
                     k_val += 1
                     curr_solution_items.append(top_item_indx)
                     curr_objective = objective_with_top_item
-                    self.kSolDict[k_val] = {"Items": [self.items[idx] for idx in curr_solution_items], "Skills": curr_solution_items, "Coverage": curr_objective}
+                    self.kSolDict[k_val] = {"Items": [self.items[idx] for idx in curr_solution_items], "Objective": curr_objective}
                     logging.debug("k = {}, Adding item {}, curr_objective={:.3f}".format(k_val, self.items[top_item_indx], curr_objective))
             
             #Otherwise re-insert top item into heap with updated marginal gain
@@ -147,14 +147,17 @@ class paretoCardinalityRestaurants():
         self.createItemMaxHeap()
 
         #Select top k items
-        for k_val in range(1, self.k_max + 1):
-            if self.maxHeap:
-                top_item_key = heappop(self.maxHeap)
-                top_item_indx = top_item_key[1]
+        k_val = 0
+        while self.maxHeap and k_val < self.k_max:
+            top_item_key = heappop(self.maxHeap)
+            top_item_indx = top_item_key[1]
 
+            marginal_gain = self.getItemMarginalGain(top_item_indx, curr_solution_items)
+            if marginal_gain > 0:
+                k_val += 1
                 curr_solution_items.append(top_item_indx)
-                curr_objective = self.computeSolutionObjective(curr_solution_items)
-                self.kSolDict[k_val] = {"Items": [self.items[idx] for idx in curr_solution_items], "Skills": curr_solution_items, "Coverage": curr_objective}
+                curr_objective += marginal_gain
+                self.kSolDict[k_val] = {"Items": [self.items[idx] for idx in curr_solution_items], "Objective": curr_objective}
                 logging.debug("k = {}, Adding top item {}, curr_objective={:.3f}".format(k_val, self.items[top_item_indx], curr_objective))
 
         runTime = time.perf_counter() - startTime
@@ -178,7 +181,7 @@ class paretoCardinalityRestaurants():
         for k_val in range(1, self.k_max + 1):
             curr_solution_items.append(selected_indices[k_val-1])
             curr_objective = self.computeSolutionObjective(curr_solution_items)
-            self.kSolDict[k_val] = {"Items": [self.items[idx] for idx in curr_solution_items], "Skills": curr_solution_items, "Coverage": curr_objective}
+            self.kSolDict[k_val] = {"Items": [self.items[idx] for idx in curr_solution_items], "Objective": curr_objective}
 
         runTime = time.perf_counter() - startTime
         logging.info("Random Selection Solution:{}, Objective:{:.3f}, Runtime = {:.2f} seconds".format(curr_solution_items, curr_objective, runTime))

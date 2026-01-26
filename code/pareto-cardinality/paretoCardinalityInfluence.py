@@ -3,6 +3,9 @@ from heapq import heappop, heappush, heapify
 import numpy as np
 import networkx as nx
 from collections import defaultdict
+import matplotlib.cm as cm
+import matplotlib.pyplot as plt
+
 import logging
 
 logging.basicConfig(format='%(asctime)s |%(levelname)s: %(message)s', level=logging.INFO)
