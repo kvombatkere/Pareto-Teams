@@ -676,17 +676,17 @@ def createGraph(data_path_file):
 
     # Take only the largest connected component with size <= 5000
     if len(G_undir) > 0:
-        components = [cc for cc in nx.connected_components(G_undir) if len(cc) <= 1200]
+        components = [cc for cc in nx.connected_components(G_undir) if len(cc) <= 100]
         if components:
             largest_cc = max(components, key=len)
         else:
-            # If no component <=1200, take the largest overall
+            # If no component <=500, take the largest overall
             largest_cc = max(nx.connected_components(G_undir), key=len)
         G_undir = G_undir.subgraph(largest_cc).copy()  # Create a copy of the subgraph
 
     # Add default weights (can be adjusted)
     for u, v in G_undir.edges():
-        G_undir[u][v]['weight'] = 0.1  # placeholder probability
+        G_undir[u][v]['weight'] = 0.01  # placeholder probability
 
     neighbors = defaultdict(list)
     for u, v in G_undir.edges():

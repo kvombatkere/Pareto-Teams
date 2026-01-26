@@ -127,7 +127,7 @@ class paretoKnapsackRestaurants():
                 heappush(self.maxHeap, updated_top_item)
 
         runTime = time.perf_counter() - startTime
-        logging.info("Plain Greedy Solution:{}, Objective:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(curr_solution_items, curr_objective, curr_cost, runTime))
+        logging.debug("Plain Greedy Solution:{}, Objective:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(curr_solution_items, curr_objective, curr_cost, runTime))
 
         return curr_solution_items, curr_objective, curr_cost, runTime
     
@@ -174,7 +174,7 @@ class paretoKnapsackRestaurants():
             best_items_list = sol_items
 
         runTime = time.perf_counter() - startTime
-        logging.info("Greedy+ Solution:{}, Objective:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(best_items_list, best_objective,best_cost,runTime))
+        logging.debug("Greedy+ Solution:{}, Objective:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(best_items_list, best_objective,best_cost,runTime))
         
         #Return solution
         return best_items_list, best_objective, best_cost, runTime
@@ -292,7 +292,7 @@ class paretoKnapsackRestaurants():
             best_sol_items = list(best_single_item)
         
         runTime = time.perf_counter() - startTime
-        logging.info("2-Guess Plain Greedy Solution:{}, objective:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(best_sol_items, best_objective, best_cost, runTime))
+        logging.debug("2-Guess Plain Greedy Solution:{}, objective:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(best_sol_items, best_objective, best_cost, runTime))
 
         return best_sol_items, best_objective, best_cost, runTime
     
