@@ -83,7 +83,7 @@ class paretoCardinalityRestaurants():
         return 
 
 
-    def greedyCardinality(self):
+    def paretoGreedy(self):
         '''
         Greedy Algorithm for Submodular Maximization with cardinality constraint
         '''

@@ -67,7 +67,7 @@ class paretoCardinalityInfluence():
 
         spread = []
         for sample in self.graph_samples:
-            connected_components = sample[2] if isinstance(sample, tuple) else sample
+            connected_components = sample[1] if isinstance(sample, tuple) else sample
             active_nodes = set()
             for node in all_nodes:
                 component = connected_components.get(node)
@@ -102,7 +102,7 @@ class paretoCardinalityInfluence():
         return val
 
 
-    def greedyCardinality(self):
+    def paretoGreedy(self):
         '''
         Greedy Algorithm for Submodular Maximization under cardinality constraint
         '''
@@ -163,7 +163,7 @@ class paretoCardinalityInfluence():
 
         marginal_gain = 0
         for sample in self.graph_samples:
-            connected_components = sample[2] if isinstance(sample, tuple) else sample
+            connected_components = sample[1] if isinstance(sample, tuple) else sample
             active_nodes = set()
             for node in current_nodes:
                 component = connected_components.get(node)
