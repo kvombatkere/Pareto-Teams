@@ -178,6 +178,39 @@ class paretoKnapsackRestaurants():
         
         #Return solution
         return best_items_list, best_objective, best_cost, runTime
+
+
+    def top_k(self, k_val):
+        '''
+        Top-k heuristic: select k items by highest cost-scaled marginal gain
+        with respect to the empty set (i.e., sum of similarities / cost).
+        Only considers items that are individually within the budget.
+        '''
+        startTime = time.perf_counter()
+
+        item_scores = []
+        for e in range(self.n):
+            cost = self.costs[e]
+            if cost <= self.B and cost > 0:
+                marginal_gain = float(np.sum(self.simMatrix[:, e]))
+                item_scores.append((marginal_gain / cost, e))
+
+        item_scores.sort(key=lambda x: x[0], reverse=True)
+        selected_indices = []
+        curr_cost = 0.0
+        for _, idx in item_scores:
+            if len(selected_indices) >= max(0, k_val):
+                break
+            if curr_cost + self.costs[idx] <= self.B:
+                selected_indices.append(idx)
+                curr_cost += self.costs[idx]
+
+        curr_objective = self.computeSolutionObjective(selected_indices) if selected_indices else 0
+
+        runTime = time.perf_counter() - startTime
+        logging.debug("Top-k (cost-scaled, budget-feasible) Solution for k:{}, Objective:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(k_val, curr_objective, curr_cost, runTime))
+
+        return selected_indices, curr_objective, curr_cost, runTime
     
 
     def createmaxHeap2Guess(self, item_pair_key, item_pair_cost):

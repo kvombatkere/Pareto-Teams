@@ -233,6 +233,42 @@ class paretoKnapsackInfluence():
 
         #Return solution
         return best_nodes_list, best_influence, best_cost, runTime
+
+
+    def top_k(self, k_val):
+        '''
+        Top-k heuristic: select k nodes by highest cost-scaled marginal gain
+        with respect to the empty set (i.e., influence of single node / cost).
+        Only considers nodes that are individually within the budget.
+        '''
+        startTime = time.perf_counter()
+
+        node_scores = []
+        for i, node in enumerate(self.nodes):
+            cost = self.node_costs[node]
+            if cost <= self.B and cost > 0:
+                node_influence = self.compute_influence([node])
+                node_scores.append((node_influence / cost, i))
+
+        node_scores.sort(key=lambda x: x[0], reverse=True)
+        selected_indices = []
+        curr_cost = 0.0
+        for _, idx in node_scores:
+            if len(selected_indices) >= max(0, k_val):
+                break
+            node = self.nodes[idx]
+            cost = self.node_costs[node]
+            if curr_cost + cost <= self.B:
+                selected_indices.append(idx)
+                curr_cost += cost
+
+        solution_nodes = [self.nodes[idx] for idx in selected_indices]
+        curr_influence = self.compute_influence(solution_nodes) if solution_nodes else 0
+
+        runTime = time.perf_counter() - startTime
+        logging.debug("Top-k (cost-scaled, budget-feasible) Solution for k:{}, Influence:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(k_val, curr_influence, curr_cost, runTime))
+
+        return solution_nodes, curr_influence, curr_cost, runTime
     
 
     def createmaxHeap2Guess(self, node_pair_key, node_pair_data):

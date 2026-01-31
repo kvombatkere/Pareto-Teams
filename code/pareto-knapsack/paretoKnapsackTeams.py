@@ -213,6 +213,46 @@ class paretoKnapsackTeams():
         
         #Return solution
         return best_experts_list, sol_skills, best_coverage, best_cost, runTime
+
+
+    def top_k(self, k_val):
+        '''
+        Top-k heuristic: select k experts by highest cost-scaled marginal gain
+        with respect to the empty set (i.e., individual coverage / cost).
+        Only considers experts that are individually within the budget.
+        '''
+        startTime = time.perf_counter()
+
+        #Compute individual cost-scaled gains
+        expert_scores = []
+        for i, expert_i in enumerate(self.experts):
+            if self.costs[i] <= self.B and self.costs[i] > 0:
+                expert_cov = len(set(expert_i).intersection(self.task_skills)) / len(self.task)
+                expert_scores.append((expert_cov / self.costs[i], i))
+
+        #Sort by score descending and select up to k within budget
+        expert_scores.sort(key=lambda x: x[0], reverse=True)
+        selected_indices = []
+        curr_cost = 0
+        for _, idx in expert_scores:
+            if len(selected_indices) >= max(0, k_val):
+                break
+            if curr_cost + self.costs[idx] <= self.B:
+                selected_indices.append(idx)
+                curr_cost += self.costs[idx]
+
+        #Build solution
+        solution_skills = set()
+        solution_experts = []
+        for idx in selected_indices:
+            solution_experts.append(self.experts[idx])
+            solution_skills = solution_skills.union(set(self.experts[idx]))
+
+        curr_coverage = len(solution_skills.intersection(self.task_skills)) / len(self.task) if len(self.task) > 0 else 0
+        runTime = time.perf_counter() - startTime
+        logging.debug("Top-k (cost-scaled, budget-feasible) Solution for k:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(k_val, curr_coverage, curr_cost, runTime))
+
+        return solution_experts, solution_skills, curr_coverage, curr_cost, runTime
     
 
     def createmaxHeap2Guess(self, expert_pair_key, expert_pair_data):

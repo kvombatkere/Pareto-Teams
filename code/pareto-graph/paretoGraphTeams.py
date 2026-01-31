@@ -57,9 +57,7 @@ class paretoGraph():
 
         # Pre-sort neighbors for each center
         neighbor_order = np.argsort(self.pairwise_costs, axis=1)
-        neighbor_dists = np.take_along_axis(
-            self.pairwise_costs, neighbor_order, axis=1
-        )
+        neighbor_dists = np.take_along_axis(self.pairwise_costs, neighbor_order, axis=1)
 
         for center in range(n):
             covered_skills = set()
@@ -86,6 +84,7 @@ class paretoGraph():
 
         # Pareto pruning (increasing radius)
         radii = sorted(best_at_radius.keys())
+        best_radii = []
         best_coverages = []
         best_centers = []
         best_included_lists = []
@@ -95,24 +94,131 @@ class paretoGraph():
             cov, center, included = best_at_radius[r]
             if cov > best_so_far:
                 best_so_far = cov
+                best_radii.append(r)
                 best_coverages.append(cov)
                 best_centers.append(center)
                 best_included_lists.append(included)
 
         runTime = time.perf_counter() - startTime
+        logging.info("GreedyThresholdDiameter finished: max_coverage={:.3f}, runtime={:.3f}s"
+            .format(max(best_coverages) if best_coverages else 0.0, runTime))
+
+        return best_radii, best_coverages, best_centers, best_included_lists, runTime
+    
+
+    def graphPruning(self):
+        '''
+        Baseline algorithm starting with the entire graph, prune nodes in greedy heuristic manner
+        Keep track of the coverage objective and diameter cost at each step
+        '''
+        startTime = time.perf_counter()
+
+        n = self.n
+        task_skills = self.task_skills
+        task_size = len(self.task)
+
+        # Precompute expert skill sets
+        expert_skill_sets = [set(e) for e in self.experts]
+
+        # Initialize included experts and skill counts
+        included = list(range(n))
+        skill_counts = {}
+        for idx in included:
+            for s in expert_skill_sets[idx]:
+                if s in task_skills:
+                    skill_counts[s] = skill_counts.get(s, 0) + 1
+
+        def compute_coverage(counts):
+            if task_size == 0:
+                return 0.0
+            covered = sum(1 for s, c in counts.items() if c > 0)
+            return covered / task_size
+
+        def compute_diameter(indices):
+            if len(indices) <= 1:
+                return 0.0
+            sub = self.pairwise_costs[np.ix_(indices, indices)]
+            return float(np.max(sub))
+
+        # Track sequence of (diameter, coverage, included_list)
+        seq_diams = []
+        seq_covs = []
+        seq_included = []
+
+        # Greedy pruning loop
+        while len(included) > 0:
+            curr_cov = compute_coverage(skill_counts)
+            curr_diam = compute_diameter(included)
+            seq_diams.append(curr_diam)
+            seq_covs.append(curr_cov)
+            seq_included.append(included.copy())
+
+            if len(included) == 1:
+                break
+
+            # Compute unique contribution for each expert
+            unique_contrib = {}
+            for idx in included:
+                count = 0
+                for s in expert_skill_sets[idx]:
+                    if s in task_skills and skill_counts.get(s, 0) == 1:
+                        count += 1
+                unique_contrib[idx] = count
+
+            # Break ties by removing node with largest max distance to others
+            best_remove = None
+            best_key = None
+            for idx in included:
+                max_dist = float(np.max(self.pairwise_costs[idx, included]))
+                key = (unique_contrib[idx], -max_dist)
+                if best_key is None or key < best_key:
+                    best_key = key
+                    best_remove = idx
+
+            # Remove selected expert and update skill counts
+            if best_remove is None:
+                break
+            included.remove(best_remove)
+            for s in expert_skill_sets[best_remove]:
+                if s in task_skills:
+                    skill_counts[s] = max(0, skill_counts.get(s, 0) - 1)
+
+        # Map: diameter -> (coverage, center, included_list)
+        best_at_diameter = {}
+        for diam, cov, incl in zip(seq_diams, seq_covs, seq_included):
+            if diam not in best_at_diameter or cov > best_at_diameter[diam][0]:
+                best_at_diameter[diam] = (cov, -1, incl)
+
+        # Pareto pruning (increasing diameter)
+        radii = sorted(best_at_diameter.keys())
+        best_coverages = []
+        best_centers = []
+        best_included_lists = []
+
+        best_so_far = -1
+        for r in radii:
+            cov, center, incl = best_at_diameter[r]
+            if cov > best_so_far:
+                best_so_far = cov
+                best_coverages.append(cov)
+                best_centers.append(center)
+                best_included_lists.append(incl)
+
+        runTime = time.perf_counter() - startTime
         logging.info(
-            "GreedyThresholdDiameter finished: max_coverage={:.3f}, runtime={:.3f}s"
-            .format(max(best_coverages) if best_coverages else 0.0, runTime)
+            "GraphPruning finished: max_coverage={:.3f}, runtime={:.3f}s".format(
+                max(best_coverages) if best_coverages else 0.0, runTime
+            )
         )
 
         return radii, best_coverages, best_centers, best_included_lists, runTime
-    
+
 
 def import_pickled_datasets(dataset_name, dataset_num):
     '''
     Code to quickly import final datasets for experiments
     '''
-    data_path = '../..datasets/pickled_data/' + dataset_name + '/' + dataset_name + '_'
+    data_path = '../../datasets/pickled_data/' + dataset_name + '/' + dataset_name + '_'
     
     #Import pickled data
     with open(data_path + 'experts_{}.pkl'.format(dataset_num), "rb") as fp:
@@ -132,7 +238,6 @@ def import_pickled_datasets(dataset_name, dataset_num):
         logging.info("Imported {} graph matrix, Shape: {}\n".format(dataset_name, graphmat.shape))
 
     return experts, tasks, costs_arr, graphmat
-
 
 
     # def greedyThresholdDiameter(self):
