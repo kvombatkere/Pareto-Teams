@@ -69,7 +69,7 @@ class paretoGraphInfluence:
 
     def compute_influence(self, node_list):
         '''
-        Compute expected influence spread of a set of nodes (normalized).
+        Compute expected influence spread of a set of nodes (unnormalized).
         '''
         if self.n == 0:
             return 0.0
@@ -84,7 +84,7 @@ class paretoGraphInfluence:
                 if component is not None:
                     active_nodes.update(component)
             spread.append(len(active_nodes))
-        return float(np.mean(spread) / self.n)
+        return float(np.mean(spread))
 
     def compute_marginal_gain(self, current_nodes, new_node):
         '''
@@ -106,7 +106,7 @@ class paretoGraphInfluence:
             component_new = connected_components.get(new_node)
             if component_new is not None:
                 marginal_gain += len(component_new - active_nodes)
-        return float(marginal_gain / len(self.graph_samples) / self.n)
+        return float(marginal_gain / len(self.graph_samples))
 
     def ParetoGreedyDiameter(self):
         """
@@ -115,6 +115,7 @@ class paretoGraphInfluence:
         """
         startTime = time.perf_counter()
         n = self.n
+        max_obj = float(n)
 
         best_at_radius = {}
 
@@ -139,12 +140,12 @@ class paretoGraphInfluence:
                         active_nodes[s_idx].update(component)
                     total_active += len(active_nodes[s_idx])
 
-                obj = float(total_active / max(1, len(self.graph_samples)) / max(1, n))
+                obj = float(total_active / max(1, len(self.graph_samples)))
 
                 if r not in best_at_radius or obj > best_at_radius[r][0]:
                     best_at_radius[r] = (obj, center, included.copy())
 
-                if obj >= 0.999:
+                if max_obj > 0 and obj >= 0.999 * max_obj:
                     break
 
         if 0.0 not in best_at_radius and n > 0:
@@ -255,6 +256,7 @@ class paretoGraphInfluence:
         startTime = time.perf_counter()
 
         n = self.n
+        max_obj = float(n)
         included = []
 
         seq_diams, seq_objs, seq_included = [], [], []
@@ -295,7 +297,7 @@ class paretoGraphInfluence:
             seq_objs.append(best_obj if best_obj is not None else 0.0)
             seq_included.append(included.copy())
 
-            if best_obj is not None and best_obj >= 0.999:
+            if max_obj > 0 and best_obj is not None and best_obj >= 0.999 * max_obj:
                 break
 
         runTime = time.perf_counter() - startTime
@@ -389,7 +391,8 @@ def import_influence_data(data_path):
 
 def compute_pairwise_costs_from_graph(G, nodes=None):
     '''
-    Compute pairwise shortest-path distances for a graph.
+    Compute pairwise shortest-path distances for a graph using
+    edge weights inversely proportional to shared neighbors.
     Returns (pairwise_costs, nodes).
     '''
     if nodes is None:
@@ -399,10 +402,17 @@ def compute_pairwise_costs_from_graph(G, nodes=None):
     node_index = {node: i for i, node in enumerate(nodes)}
     dist_mat = np.full((n, n), np.inf, dtype=float)
 
+    G_weighted = G.copy()
+    neighbor_sets = {node: set(G_weighted.neighbors(node)) for node in G_weighted.nodes()}
+    for u, v in G_weighted.edges():
+        shared = len(neighbor_sets.get(u, set()) & neighbor_sets.get(v, set()))
+        weight = 1.0 / (shared + 1.0)
+        G_weighted[u][v]['weight'] = weight
+
     for node in nodes:
         src_idx = node_index[node]
         dist_mat[src_idx, src_idx] = 0.0
-        lengths = nx.single_source_shortest_path_length(G, node)
+        lengths = nx.single_source_dijkstra_path_length(G_weighted, node, weight='weight')
         for tgt, d in lengths.items():
             if tgt in node_index:
                 dist_mat[src_idx, node_index[tgt]] = float(d)

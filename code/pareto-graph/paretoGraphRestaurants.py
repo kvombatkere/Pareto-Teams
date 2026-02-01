@@ -50,7 +50,7 @@ class paretoGraphRestaurants:
     def _objective_from_max_sims(self, max_sims):
         if self.n == 0:
             return 0.0
-        return float(np.mean(max_sims))
+        return float(np.sum(max_sims))
 
     def _compute_max_sims_for_indices(self, indices):
         if len(indices) == 0 or self.n == 0:
@@ -73,6 +73,7 @@ class paretoGraphRestaurants:
         """
         startTime = time.perf_counter()
         n = self.n
+        max_obj = float(n)
 
         best_at_radius = {}
 
@@ -94,7 +95,7 @@ class paretoGraphRestaurants:
                 if r not in best_at_radius or obj > best_at_radius[r][0]:
                     best_at_radius[r] = (obj, center, included.copy())
 
-                if obj >= 0.999:
+                if max_obj > 0 and obj >= 0.999 * max_obj:
                     break
 
         if 0.0 not in best_at_radius and n > 0:
@@ -125,8 +126,9 @@ class paretoGraphRestaurants:
                 best_included_lists.append(included)
 
         runTime = time.perf_counter() - startTime
-        logging.info("GreedyThresholdDiameter finished: max_objective={:.3f}, runtime={:.3f}s".format(
-            max(best_objectives) if best_objectives else 0.0, runTime
+        num_items_chosen = len(best_included_lists[-1]) if best_included_lists else 0
+        logging.info("ParetoGreedyDiameter finished: max_objective={:.3f}, runtime={:.3f}s, items={}".format(
+            max(best_objectives) if best_objectives else 0.0, runTime, num_items_chosen
         ))
 
         best_diameters = [self._compute_diameter_from_indices(self.pairwise_costs, incl)
@@ -201,13 +203,11 @@ class paretoGraphRestaurants:
                 best_included_lists.append(incl)
 
         runTime = time.perf_counter() - startTime
-        logging.info(
-            "GraphPruning finished: max_objective={:.3f}, runtime={:.3f}s".format(
-                max(best_objectives) if best_objectives else 0.0, runTime
-            )
-        )
+        logging.info("GraphPruning finished: max_objective={:.3f}, runtime={:.3f}s".format(
+            max(best_objectives) if best_objectives else 0.0, runTime))
 
         return radii, best_objectives, best_centers, best_included_lists, runTime
+
 
     def plainGreedyDistanceScaled(self):
         '''
@@ -217,6 +217,7 @@ class paretoGraphRestaurants:
         startTime = time.perf_counter()
 
         n = self.n
+        max_obj = float(n)
         included = []
         max_sims = np.zeros(n, dtype=float)
 
@@ -258,7 +259,7 @@ class paretoGraphRestaurants:
             seq_objs.append(best_obj if best_obj is not None else 0.0)
             seq_included.append(included.copy())
 
-            if best_obj is not None and best_obj >= 0.999:
+            if max_obj > 0 and best_obj is not None and best_obj >= 0.999 * max_obj:
                 break
 
         runTime = time.perf_counter() - startTime
