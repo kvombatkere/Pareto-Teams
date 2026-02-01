@@ -51,10 +51,6 @@ class paretoGraph():
         off_diag = sub[~np.eye(len(indices), dtype=bool)]
         if off_diag.size == 0:
             return 0.0
-        # prefer non-zero distances if zeros represent missing edges
-        nonzero = off_diag[off_diag > 0]
-        if nonzero.size > 0:
-            return float(np.max(nonzero))
         return float(np.max(off_diag))
 
     
@@ -106,14 +102,7 @@ class paretoGraph():
                 if cov >= 1.0:
                     break
 
-        # Pareto pruning (increasing radius)
-        radii = sorted(best_at_radius.keys())
-        best_radii = []
-        best_coverages = []
-        best_centers = []
-        best_included_lists = []
-
-        # Ensure r=0 is included in the solution set
+        # Pareto pruning (increasing radius): keep points with strict objective increase
         if 0.0 not in best_at_radius:
             best_cov = -1
             best_center = None
@@ -127,20 +116,15 @@ class paretoGraph():
                     best_included = [center]
             if best_center is not None:
                 best_at_radius[0.0] = (best_cov, best_center, best_included)
-                radii = sorted(best_at_radius.keys())
+
+        radii = sorted(best_at_radius.keys())
+        best_radii = []
+        best_coverages = []
+        best_centers = []
+        best_included_lists = []
 
         best_so_far = -1
-        if radii and radii[0] == 0.0:
-            cov, center, included = best_at_radius[0.0]
-            best_radii.append(0.0)
-            best_coverages.append(cov)
-            best_centers.append(center)
-            best_included_lists.append(included)
-            best_so_far = cov
-
         for r in radii:
-            if r == 0.0:
-                continue
             cov, center, included = best_at_radius[r]
             if cov > best_so_far:
                 best_so_far = cov
@@ -153,8 +137,10 @@ class paretoGraph():
         logging.info("GreedyThresholdDiameter finished: max_coverage={:.3f}, runtime={:.3f}s"
             .format(max(best_coverages) if best_coverages else 0.0, runTime))
 
-        # Return diameter costs (2 * radius)
-        best_diameters = [2.0 * r for r in best_radii]
+        # Return actual diameters for each selected solution
+        best_diameters = [self._compute_diameter_from_indices(self.pairwise_costs, incl)
+                  for incl in best_included_lists]
+        
         return best_diameters, best_coverages, best_centers, best_included_lists, runTime
     
 
@@ -322,26 +308,11 @@ class paretoGraph():
             if best_cov is not None and best_cov >= 1.0:
                 break
 
-        # Map: diameter -> (coverage, included_list)
-        best_at_diameter = {}
-        for diam, cov, incl in zip(seq_diams, seq_covs, seq_included):
-            if diam not in best_at_diameter or cov > best_at_diameter[diam][0]:
-                best_at_diameter[diam] = (cov, incl)
-
-        # Pareto pruning (increasing diameter)
-        diameters = sorted(best_at_diameter.keys())
-        best_coverages = []
-        best_centers = []
-        best_included_lists = []
-
-        best_so_far = -1
-        for d in diameters:
-            cov, incl = best_at_diameter[d]
-            if cov > best_so_far:
-                best_so_far = cov
-                best_coverages.append(cov)
-                best_centers.append(-1)
-                best_included_lists.append(incl)
+        # Baseline: no Pareto pruning
+        diameters = seq_diams
+        best_coverages = seq_covs
+        best_centers = [-1 for _ in seq_diams]
+        best_included_lists = seq_included
 
         runTime = time.perf_counter() - startTime
         logging.info(
@@ -355,9 +326,9 @@ class paretoGraph():
 
     def topKDistanceScaled(self, diameter_values=None):
         '''
-        Top-K baseline: for each target diameter, greedily add nodes by
-        distance-scaled marginal gain, only if the resulting diameter
-        stays within the target.
+        Top-K baseline: compute a single ordering by highest degree
+        (sum of edge weights), then add nodes in that order and track the
+        resulting diameter after each addition.
 
         Returns:
             diameters          : list of diameters (Pareto-pruned)
@@ -372,91 +343,35 @@ class paretoGraph():
         task_size = len(self.task)
         task_skills = self.task_skills
 
-        # Default diameter targets from distance quantiles
-        if diameter_values is None:
-            upper = self.pairwise_costs[np.triu_indices(n, k=1)]
-            nonzero = upper[upper > 0]
-            if nonzero.size == 0:
-                diameter_values = [0.0]
-            else:
-                qs = [0.25, 0.5, 0.75, 0.9]
-                diameter_values = sorted(set(float(np.quantile(nonzero, q)) for q in qs))
+        # Build a single ordering by highest degree (sum of edge weights)
+        degrees = np.sum(self.pairwise_costs, axis=1)
+        if n > 0:
+            degrees = degrees - np.diag(self.pairwise_costs)
+        degrees = np.asarray(degrees, dtype=float)
+        ordered_indices = list(np.argsort(-degrees, kind='mergesort'))
 
         seq_diams = []
         seq_covs = []
         seq_included = []
 
-        for diam_target in diameter_values:
-            included = []
-            covered_skills = set()
-            remaining = set(range(n))
+        included = []
+        covered_skills = set()
+        for idx in ordered_indices:
+            # Add next highest-degree node in order
+            included.append(idx)
+            covered_skills |= set(self.experts[idx])
+            # Track diameter and coverage after each addition
+            curr_diam = self._compute_diameter_from_indices(self.pairwise_costs, included)
+            curr_cov = self._compute_coverage(task_size, task_skills=task_skills, covered_skills=covered_skills)
+            seq_diams.append(curr_diam)
+            seq_covs.append(curr_cov)
+            seq_included.append(included.copy())
 
-            while remaining:
-                best_idx = None
-                best_score = -1
-                best_cov = None
-
-                for idx in remaining:
-                    new_covered = covered_skills | set(self.experts[idx])
-                    cov = self._compute_coverage(task_size, task_skills=task_skills, covered_skills=new_covered)
-                    curr_cov = self._compute_coverage(task_size, task_skills=task_skills, covered_skills=covered_skills)
-                    marginal_gain = cov - curr_cov
-
-                    if included:
-                        avg_dist = float(np.mean(self.pairwise_costs[idx, included]))
-                    else:
-                        avg_dist = 1.0
-
-                    if avg_dist <= 0:
-                        score = marginal_gain
-                    else:
-                        score = marginal_gain / avg_dist
-
-                    if score > best_score:
-                        best_score = score
-                        best_idx = idx
-                        best_cov = cov
-
-                if best_idx is None:
-                    break
-
-                candidate = included + [best_idx]
-                cand_diam = self._compute_diameter_from_indices(self.pairwise_costs, candidate)
-                if cand_diam <= diam_target:
-                    included.append(best_idx)
-                    covered_skills |= set(self.experts[best_idx])
-                    remaining.remove(best_idx)
-                    if best_cov is not None and best_cov >= 1.0:
-                        break
-                else:
-                    remaining.remove(best_idx)
-
-            final_cov = self._compute_coverage(task_size, task_skills=task_skills, covered_skills=covered_skills)
-            final_diam = self._compute_diameter_from_indices(self.pairwise_costs, included)
-            seq_diams.append(final_diam)
-            seq_covs.append(final_cov)
-            seq_included.append(included)
-
-        # Map: diameter -> (coverage, included_list)
-        best_at_diameter = {}
-        for diam, cov, incl in zip(seq_diams, seq_covs, seq_included):
-            if diam not in best_at_diameter or cov > best_at_diameter[diam][0]:
-                best_at_diameter[diam] = (cov, incl)
-
-        # Pareto pruning (increasing diameter)
-        diameters = sorted(best_at_diameter.keys())
-        best_coverages = []
-        best_centers = []
-        best_included_lists = []
-
-        best_so_far = -1
-        for d in diameters:
-            cov, incl = best_at_diameter[d]
-            if cov > best_so_far:
-                best_so_far = cov
-                best_coverages.append(cov)
-                best_centers.append(-1)
-                best_included_lists.append(incl)
+        # Baseline: no Pareto pruning
+        diameters = seq_diams
+        best_coverages = seq_covs
+        best_centers = [-1 for _ in seq_diams]
+        best_included_lists = seq_included
 
         runTime = time.perf_counter() - startTime
         logging.info(
