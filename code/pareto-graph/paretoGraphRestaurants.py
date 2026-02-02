@@ -73,7 +73,6 @@ class paretoGraphRestaurants:
         """
         startTime = time.perf_counter()
         n = self.n
-        max_obj = float(n)
 
         best_at_radius = {}
 
@@ -94,23 +93,6 @@ class paretoGraphRestaurants:
 
                 if r not in best_at_radius or obj > best_at_radius[r][0]:
                     best_at_radius[r] = (obj, center, included.copy())
-
-                if max_obj > 0 and obj >= 0.999 * max_obj:
-                    break
-
-        if 0.0 not in best_at_radius and n > 0:
-            best_obj = -1
-            best_center = None
-            best_included = []
-            for center in range(n):
-                max_sims = self.simMatrix[:, center]
-                obj = self._objective_from_max_sims(max_sims)
-                if obj > best_obj:
-                    best_obj = obj
-                    best_center = center
-                    best_included = [center]
-            if best_center is not None:
-                best_at_radius[0.0] = (best_obj, best_center, best_included)
 
         radii = sorted(best_at_radius.keys())
         best_diams, best_objectives, best_centers, best_included_lists = [], [], [], []

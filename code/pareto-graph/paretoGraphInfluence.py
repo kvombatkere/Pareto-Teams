@@ -115,7 +115,6 @@ class paretoGraphInfluence:
         """
         startTime = time.perf_counter()
         n = self.n
-        max_obj = float(n)
 
         best_at_radius = {}
 
@@ -145,22 +144,6 @@ class paretoGraphInfluence:
                 if r not in best_at_radius or obj > best_at_radius[r][0]:
                     best_at_radius[r] = (obj, center, included.copy())
 
-                if max_obj > 0 and obj >= 0.999 * max_obj:
-                    break
-
-        if 0.0 not in best_at_radius and n > 0:
-            best_obj = -1
-            best_center = None
-            best_included = []
-            for center in range(n):
-                obj = self.compute_influence([self.nodes[center]])
-                if obj > best_obj:
-                    best_obj = obj
-                    best_center = center
-                    best_included = [center]
-            if best_center is not None:
-                best_at_radius[0.0] = (best_obj, best_center, best_included)
-
         radii = sorted(best_at_radius.keys())
         best_diams, best_objectives, best_centers, best_included_lists = [], [], [], []
 
@@ -175,12 +158,20 @@ class paretoGraphInfluence:
                 best_included_lists.append(included)
 
         runTime = time.perf_counter() - startTime
+        best_diameters = [self._compute_diameter_from_indices(self.pairwise_costs, incl)
+                          for incl in best_included_lists]
+
         logging.info("GreedyThresholdDiameter finished: max_influence={:.3f}, runtime={:.3f}s".format(
             max(best_objectives) if best_objectives else 0.0, runTime
         ))
-
-        best_diameters = [self._compute_diameter_from_indices(self.pairwise_costs, incl)
-                          for incl in best_included_lists]
+        logging.info(
+            "GreedyThresholdDiameter solutions: {}".format(
+                "; ".join(
+                    f"(d={d:.3f}, infl={v:.3f}, |S|={len(s)})"
+                    for d, v, s in zip(best_diameters, best_objectives, best_included_lists)
+                )
+            )
+        )
 
         return best_diameters, best_objectives, best_centers, best_included_lists, runTime
 
@@ -226,18 +217,18 @@ class paretoGraphInfluence:
         best_at_diameter = {}
         for diam, obj, incl in zip(seq_diams, seq_objs, seq_included):
             if diam not in best_at_diameter or obj > best_at_diameter[diam][0]:
-                best_at_diameter[diam] = (obj, -1, incl)
+                best_at_diameter[diam] = (obj, incl)
 
-        radii = sorted(best_at_diameter.keys())
-        best_objectives, best_centers, best_included_lists = [], [], []
-        best_so_far = -1
-        for r in radii:
-            obj, center, incl = best_at_diameter[r]
-            if obj > best_so_far:
-                best_so_far = obj
-                best_objectives.append(obj)
-                best_centers.append(center)
-                best_included_lists.append(incl)
+        diameters = []
+        best_objectives = []
+        best_included_lists = []
+        for diam in sorted(best_at_diameter.keys()):
+            obj, incl = best_at_diameter[diam]
+            diameters.append(diam)
+            best_objectives.append(obj)
+            best_included_lists.append(incl)
+
+        best_centers = [-1 for _ in diameters]
 
         runTime = time.perf_counter() - startTime
         logging.info(
@@ -245,69 +236,192 @@ class paretoGraphInfluence:
                 max(best_objectives) if best_objectives else 0.0, runTime
             )
         )
+        logging.info(
+            "GraphPruning solutions: {}".format(
+                "; ".join(
+                    f"(d={d:.3f}, infl={v:.3f}, |S|={len(s)})"
+                    for d, v, s in zip(diameters, best_objectives, best_included_lists)
+                )
+            )
+        )
 
-        return radii, best_objectives, best_centers, best_included_lists, runTime
+        return diameters, best_objectives, best_centers, best_included_lists, runTime
 
-    def plainGreedyDistanceScaled(self):
+    def plainGreedyDistanceScaled(self, diameters=None, num_steps=8):
         '''
         Plain Greedy baseline that scales marginal influence gain by the
         average distance to nodes in the current solution.
+
+        If diameters is provided, greedily build a solution that satisfies
+        each diameter constraint and return one solution per diameter.
         '''
         startTime = time.perf_counter()
 
         n = self.n
         max_obj = float(n)
-        included = []
 
-        seq_diams, seq_objs, seq_included = [], [], []
+        if diameters is None:
+            max_diameter = float(np.max(self.pairwise_costs)) if self.pairwise_costs.size > 0 else 1.0
+            min_diameter = 0.0
+            diameters = list(np.linspace(min_diameter, max_diameter, num_steps))
+        else:
+            diameters = list(diameters)
 
-        remaining = set(range(n))
-        while remaining:
-            best_idx = None
-            best_score = -1
-            best_obj = None
-            curr_nodes = [self.nodes[i] for i in included]
-            curr_obj = self.compute_influence(curr_nodes)
+        if len(diameters) == 0:
+            included = []
+            seq_diams, seq_objs, seq_included = [], [], []
 
-            for idx in remaining:
-                node_idx = self.nodes[idx]
-                obj = self.compute_influence(curr_nodes + [node_idx])
-                marginal_gain = obj - curr_obj
+            remaining = set(range(n))
+            while remaining:
+                best_idx = None
+                best_score = -1
+                best_obj = None
+                curr_nodes = [self.nodes[i] for i in included]
+                curr_obj = self.compute_influence(curr_nodes)
 
-                if included:
-                    avg_dist = float(np.mean(self.pairwise_costs[idx, included]))
-                else:
-                    avg_dist = 1.0
+                for idx in remaining:
+                    node_idx = self.nodes[idx]
+                    obj = self.compute_influence(curr_nodes + [node_idx])
+                    marginal_gain = obj - curr_obj
 
-                score = marginal_gain if avg_dist <= 0 else marginal_gain / avg_dist
+                    if included:
+                        avg_dist = float(np.mean(self.pairwise_costs[idx, included]))
+                    else:
+                        avg_dist = 1.0
 
-                if score > best_score:
-                    best_score = score
-                    best_idx = idx
-                    best_obj = obj
+                    score = marginal_gain if avg_dist <= 0 else marginal_gain / avg_dist
 
-            if best_idx is None:
-                break
+                    if score > best_score:
+                        best_score = score
+                        best_idx = idx
+                        best_obj = obj
 
-            included.append(best_idx)
-            remaining.remove(best_idx)
+                if best_idx is None:
+                    break
 
-            curr_diam = self._compute_diameter_from_indices(self.pairwise_costs, included)
-            seq_diams.append(curr_diam)
-            seq_objs.append(best_obj if best_obj is not None else 0.0)
-            seq_included.append(included.copy())
+                included.append(best_idx)
+                remaining.remove(best_idx)
 
-            if max_obj > 0 and best_obj is not None and best_obj >= 0.999 * max_obj:
-                break
+                curr_diam = self._compute_diameter_from_indices(self.pairwise_costs, included)
+                seq_diams.append(curr_diam)
+                seq_objs.append(best_obj if best_obj is not None else 0.0)
+                seq_included.append(included.copy())
+
+                if max_obj > 0 and best_obj is not None and best_obj >= 0.999 * max_obj:
+                    break
+
+            runTime = time.perf_counter() - startTime
+            logging.info(
+                "PlainGreedyDistanceScaled finished: max_influence={:.3f}, runtime={:.3f}s".format(
+                    max(seq_objs) if seq_objs else 0.0, runTime
+                )
+            )
+            logging.info(
+                "PlainGreedyDistanceScaled solutions: {}".format(
+                    "; ".join(
+                        f"(d={d:.3f}, infl={v:.3f}, |S|={len(s)})"
+                        for d, v, s in zip(seq_diams, seq_objs, seq_included)
+                    )
+                )
+            )
+
+            best_at_diameter = {}
+            for diam, obj, incl in zip(seq_diams, seq_objs, seq_included):
+                if diam not in best_at_diameter or obj > best_at_diameter[diam][0]:
+                    best_at_diameter[diam] = (obj, incl)
+
+            diameters = []
+            best_objectives = []
+            best_included_lists = []
+            for diam in sorted(best_at_diameter.keys()):
+                obj, incl = best_at_diameter[diam]
+                diameters.append(diam)
+                best_objectives.append(obj)
+                best_included_lists.append(incl)
+
+            return diameters, best_objectives, [-1 for _ in diameters], best_included_lists, runTime
+
+        best_diams, best_objs, best_included_lists = [], [], []
+
+        for target_diam in diameters:
+            included = []
+            remaining = set(range(n))
+            best_obj = 0.0
+
+            while remaining:
+                best_idx = None
+                best_score = -1
+                best_obj_candidate = None
+                curr_nodes = [self.nodes[i] for i in included]
+                curr_obj = self.compute_influence(curr_nodes)
+
+                for idx in remaining:
+                    trial_included = included + [idx]
+                    trial_diam = self._compute_diameter_from_indices(self.pairwise_costs, trial_included)
+                    if trial_diam > target_diam:
+                        continue
+
+                    node_idx = self.nodes[idx]
+                    obj = self.compute_influence(curr_nodes + [node_idx])
+                    marginal_gain = obj - curr_obj
+
+                    if included:
+                        avg_dist = float(np.mean(self.pairwise_costs[idx, included]))
+                    else:
+                        avg_dist = 1.0
+
+                    score = marginal_gain if avg_dist <= 0 else marginal_gain / avg_dist
+
+                    if score > best_score:
+                        best_score = score
+                        best_idx = idx
+                        best_obj_candidate = obj
+
+                if best_idx is None:
+                    break
+
+                included.append(best_idx)
+                remaining.remove(best_idx)
+                best_obj = best_obj_candidate if best_obj_candidate is not None else best_obj
+
+                if max_obj > 0 and best_obj >= 0.999 * max_obj:
+                    break
+
+            final_diam = self._compute_diameter_from_indices(self.pairwise_costs, included)
+            best_diams.append(final_diam)
+            best_objs.append(best_obj)
+            best_included_lists.append(included.copy())
 
         runTime = time.perf_counter() - startTime
+        best_at_diameter = {}
+        for diam, obj, incl in zip(best_diams, best_objs, best_included_lists):
+            if diam not in best_at_diameter or obj > best_at_diameter[diam][0]:
+                best_at_diameter[diam] = (obj, incl)
+
+        pruned_diams = []
+        pruned_objs = []
+        pruned_included = []
+        for diam in sorted(best_at_diameter.keys()):
+            obj, incl = best_at_diameter[diam]
+            pruned_diams.append(diam)
+            pruned_objs.append(obj)
+            pruned_included.append(incl)
+
         logging.info(
             "PlainGreedyDistanceScaled finished: max_influence={:.3f}, runtime={:.3f}s".format(
-                max(seq_objs) if seq_objs else 0.0, runTime
+                max(pruned_objs) if pruned_objs else 0.0, runTime
+            )
+        )
+        logging.info(
+            "PlainGreedyDistanceScaled solutions: {}".format(
+                "; ".join(
+                    f"(d={d:.3f}, infl={v:.3f}, |S|={len(s)})"
+                    for d, v, s in zip(pruned_diams, pruned_objs, pruned_included)
+                )
             )
         )
 
-        return seq_diams, seq_objs, [-1 for _ in seq_diams], seq_included, runTime
+        return pruned_diams, pruned_objs, [-1 for _ in pruned_diams], pruned_included, runTime
 
     def topKDistanceScaled(self):
         '''
@@ -337,13 +451,35 @@ class paretoGraphInfluence:
             seq_included.append(included.copy())
 
         runTime = time.perf_counter() - startTime
+        best_at_diameter = {}
+        for diam, obj, incl in zip(seq_diams, seq_objs, seq_included):
+            if diam not in best_at_diameter or obj > best_at_diameter[diam][0]:
+                best_at_diameter[diam] = (obj, incl)
+
+        pruned_diams = []
+        pruned_objs = []
+        pruned_included = []
+        for diam in sorted(best_at_diameter.keys()):
+            obj, incl = best_at_diameter[diam]
+            pruned_diams.append(diam)
+            pruned_objs.append(obj)
+            pruned_included.append(incl)
+
         logging.info(
             "TopKDistanceScaled finished: max_influence={:.3f}, runtime={:.3f}s".format(
-                max(seq_objs) if seq_objs else 0.0, runTime
+                max(pruned_objs) if pruned_objs else 0.0, runTime
+            )
+        )
+        logging.info(
+            "TopKDistanceScaled solutions: {}".format(
+                "; ".join(
+                    f"(d={d:.3f}, infl={v:.3f}, |S|={len(s)})"
+                    for d, v, s in zip(pruned_diams, pruned_objs, pruned_included)
+                )
             )
         )
 
-        return seq_diams, seq_objs, [-1 for _ in seq_diams], seq_included, runTime
+        return pruned_diams, pruned_objs, [-1 for _ in pruned_diams], pruned_included, runTime
 
 
 def createGraph(data_path_file):
@@ -403,11 +539,10 @@ def compute_pairwise_costs_from_graph(G, nodes=None):
     dist_mat = np.full((n, n), np.inf, dtype=float)
 
     G_weighted = G.copy()
-    neighbor_sets = {node: set(G_weighted.neighbors(node)) for node in G_weighted.nodes()}
+    neighbor_sets = {node: set(G.neighbors(node)) for node in G.nodes()}
     for u, v in G_weighted.edges():
-        shared = len(neighbor_sets.get(u, set()) & neighbor_sets.get(v, set()))
-        weight = 1.0 / (shared + 1.0)
-        G_weighted[u][v]['weight'] = weight
+        shared = len(neighbor_sets[u] & neighbor_sets[v])
+        G_weighted[u][v]['weight'] = float(np.exp(-0.1 * shared))
 
     for node in nodes:
         src_idx = node_index[node]
@@ -418,14 +553,8 @@ def compute_pairwise_costs_from_graph(G, nodes=None):
                 dist_mat[src_idx, node_index[tgt]] = float(d)
 
     finite_vals = dist_mat[np.isfinite(dist_mat)]
-    if finite_vals.size == 0:
-        dist_mat[:] = 0.0
-    else:
-        max_finite = float(np.max(finite_vals))
-        if not np.isfinite(max_finite):
-            max_finite = 1.0
-        fill_val = max_finite + 1.0
-        dist_mat[~np.isfinite(dist_mat)] = fill_val
+    max_finite = float(np.max(finite_vals)) if finite_vals.size > 0 else 1.0
+    dist_mat[~np.isfinite(dist_mat)] = 10.0 * max_finite
 
     return dist_mat, nodes
 
