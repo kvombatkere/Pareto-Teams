@@ -651,7 +651,7 @@ class paretoKnapsackInfluence():
                             #Track best influence for this cost
                             if curr_cost not in cost_influence_map or curr_influence > cost_influence_map[curr_cost][0]:
                                 cost_influence_map[curr_cost] = [curr_influence, solution_nodes.copy()]
-                            logging.info("Adding node {}, curr_influence={:.3f}, curr_cost={}".format(top_node, curr_influence, curr_cost))
+                            logging.debug("Adding node {}, curr_influence={:.3f}, curr_cost={}".format(top_node, curr_influence, curr_cost))
                     
                     #Otherwise re-insert top node into heap with updated marginal gain
                     else:
@@ -670,6 +670,82 @@ class paretoKnapsackInfluence():
 
         runTime = time.perf_counter() - startTime
         logging.debug("Prefix Pareto Greedy - 1 Guess Runtime = {:.2f} seconds".format(runTime))
+
+        return prunedBudgets, prunedInfluences, cost_influence_map, runTime
+
+
+    def coverage_linear(self):
+        '''
+        Linear influence sweep: for each discrete influence level, find a minimum-cost
+        solution using weighted greedy (marginal gain scaled by cost).
+        Then prune dominated solutions.
+        '''
+        startTime = time.perf_counter()
+
+        if self.n == 0:
+            return [], [], {}, 0.0
+
+        # Maximum achievable influence (using all nodes)
+        max_influence = self.compute_influence(self.nodes)
+        if max_influence <= 0:
+            return [], [], {}, 0.0
+
+        # Discrete influence targets: 1, 2, ..., ceil(max_influence)
+        max_target = int(np.ceil(max_influence))
+        target_influences = list(range(1, max_target + 1))
+
+        # Track best solution per target influence
+        cost_influence_map = {}
+
+        for infl_x in target_influences:
+            # Reset for each target influence
+            self.createNodeInfluenceMaxHeap()
+
+            curr_solution_nodes = []
+            curr_influence, curr_cost = 0.0, 0.0
+
+            # Weighted greedy until reaching target influence or no feasible node
+            while len(self.maxHeap) > 1 and (min(key[2] for key in self.maxHeap) <= (self.B - curr_cost)) and (curr_influence < infl_x):
+                top_node_key = heappop(self.maxHeap)
+                top_node_indx, top_node_cost = top_node_key[1], top_node_key[2]
+                top_node = self.nodes[top_node_indx]
+
+                influence_with_top_node = self.compute_influence(curr_solution_nodes + [top_node])
+                top_node_marginal_gain = (influence_with_top_node - curr_influence) / top_node_cost
+
+                # Compare against next best heap gain
+                second_node = self.maxHeap[0]
+                second_node_heap_gain = second_node[0] * -1
+
+                if top_node_marginal_gain >= second_node_heap_gain:
+                    if top_node_cost + curr_cost <= self.B:
+                        curr_solution_nodes.append(top_node)
+                        curr_influence = influence_with_top_node
+                        curr_cost += top_node_cost
+                        logging.debug("Adding node {}, curr_influence={:.3f}, curr_cost={}".format(top_node, curr_influence, curr_cost))
+                else:
+                    updated_top_node = (top_node_marginal_gain * -1, top_node_indx, top_node_cost)
+                    heappush(self.maxHeap, updated_top_node)
+
+            # Store if target met within budget
+            if curr_influence >= infl_x:
+                if infl_x not in cost_influence_map or curr_cost < cost_influence_map[infl_x][0]:
+                    cost_influence_map[infl_x] = [curr_cost, curr_solution_nodes.copy()]
+
+        # Prune dominated solutions: keep strictly increasing influence as cost increases
+        prunedBudgets, prunedInfluences = [], []
+        pairs = [(data[0], infl) for infl, data in cost_influence_map.items()]
+        pairs.sort(key=lambda x: x[0])  # sort by cost
+        best_infl = -1.0
+        for cost, infl in pairs:
+            if infl > best_infl:
+                best_infl = infl
+                prunedBudgets.append(cost)
+                prunedInfluences.append(infl)
+                logging.debug("Approx. Pareto Influence: {}, Cost: {}, Nodes: {}".format(infl, cost, cost_influence_map[infl][1]))
+
+        runTime = time.perf_counter() - startTime
+        logging.debug("Coverage Linear Runtime = {:.2f} seconds".format(runTime))
 
         return prunedBudgets, prunedInfluences, cost_influence_map, runTime
 
