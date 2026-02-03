@@ -676,6 +676,80 @@ class paretoKnapsackTeams():
         return prunedBudgets, prunedCoverages, cost_coverage_map, runTime
     
 
+    def coverage_linear(self):
+        '''
+        Linear coverage sweep: for each discrete coverage level, find a minimum-cost
+        solution using weighted greedy (marginal gain scaled by cost).
+        Then prune dominated solutions.
+        '''
+        startTime = time.perf_counter()
+
+        # Discrete coverage targets: 1/|task|, 2/|task|, ..., 1
+        if len(self.task) == 0:
+            return [], [], {}, 0.0
+
+        target_coverages = [k / len(self.task) for k in range(1, len(self.task) + 1)]
+
+        # Track best solution per target coverage
+        cost_coverage_map = {}
+
+        for cov_x in target_coverages:
+            # Reset for each target coverage
+            self.createExpertCoverageMaxHeap()
+
+            solution_skills = set()
+            solution_experts = []
+            curr_coverage, curr_cost = 0, 0
+
+            # Weighted greedy until reaching target coverage or no feasible expert
+            while len(self.maxHeap) > 1 and (min(key[2] for key in self.maxHeap) <= (self.B - curr_cost)) and (curr_coverage < cov_x):
+                top_expert_key = heappop(self.maxHeap)
+                top_expert_indx, top_expert_cost = top_expert_key[1], top_expert_key[2]
+                top_expert_skills = set(self.experts[top_expert_indx])
+
+                sol_with_top_expert = solution_skills.union(top_expert_skills)
+                coverage_with_top_expert = len(sol_with_top_expert.intersection(self.task_skills)) / len(self.task)
+                top_expert_marginal_gain = (coverage_with_top_expert - curr_coverage) / top_expert_cost
+
+                # Compare against next best heap gain
+                second_expert = self.maxHeap[0]
+                second_expert_heap_gain = second_expert[0] * -1
+
+                if top_expert_marginal_gain >= second_expert_heap_gain:
+                    if top_expert_cost + curr_cost <= self.B:
+                        solution_skills = solution_skills.union(top_expert_skills)
+                        solution_experts.append(self.experts[top_expert_indx])
+                        curr_coverage = coverage_with_top_expert
+                        curr_cost += top_expert_cost
+                        logging.debug("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
+                else:
+                    updated_top_expert = (top_expert_marginal_gain * -1, top_expert_indx, top_expert_cost)
+                    heappush(self.maxHeap, updated_top_expert)
+
+            # Store if target met within budget
+            if curr_coverage >= cov_x:
+                # Keep minimum cost for this coverage
+                if cov_x not in cost_coverage_map or curr_cost < cost_coverage_map[cov_x][0]:
+                    cost_coverage_map[cov_x] = [curr_cost, solution_experts.copy()]
+
+        # Prune dominated solutions: keep strictly increasing coverage as cost increases
+        prunedBudgets, prunedCoverages = [], []
+        pairs = [(data[0], cov) for cov, data in cost_coverage_map.items()]
+        pairs.sort(key=lambda x: x[0])  # sort by cost
+        best_cov = -1.0
+        for cost, cov in pairs:
+            if cov > best_cov:
+                best_cov = cov
+                prunedBudgets.append(cost)
+                prunedCoverages.append(cov)
+                logging.debug("Approx. Pareto Coverage: {}, Cost: {}, Experts: {}".format(cov, cost, cost_coverage_map[cov][1]))
+
+        runTime = time.perf_counter() - startTime
+        logging.debug("Coverage Linear Runtime = {:.2f} seconds".format(runTime))
+
+        return prunedBudgets, prunedCoverages, cost_coverage_map, runTime
+    
+
 def import_pickled_datasets(dataset_name, dataset_num):
     '''
     Code to quickly import final datasets for experiments

@@ -283,7 +283,7 @@ class paretoKnapsackRestaurants():
 
             #Assign items greedily using maxHeap2Guess
             #Check if there is an element with cost that fits in budget
-            while len(self.maxHeap2Guess) > 1 and (min(key[2] for key in self.maxHeap2Guess) <= (self.B - curr_cost)):
+            while len(self.maxHeap2Guess) > 0 and (min(key[2] for key in self.maxHeap2Guess) <= (self.B - curr_cost)):
                 
                 #Pop best item from maxHeap and compute marginal gain
                 top_item_key = heappop(self.maxHeap2Guess)
@@ -293,8 +293,11 @@ class paretoKnapsackRestaurants():
                 top_item_marginal_gain = (objective_with_top_item - self.computeSolutionObjective(curr_solution_items))/top_item_cost
 
                 #Check item now on top - 2nd item on heap
-                second_item = self.maxHeap2Guess[0] 
-                second_item_heap_gain = second_item[0]*-1
+                if len(self.maxHeap2Guess) > 0:
+                    second_item = self.maxHeap2Guess[0]
+                    second_item_heap_gain = second_item[0]*-1
+                else:
+                    second_item_heap_gain = float("-inf")
 
                 #If marginal gain of top item is better we add to solution
                 if top_item_marginal_gain >= second_item_heap_gain:
@@ -466,7 +469,7 @@ class paretoKnapsackRestaurants():
                 
                 #Assign items greedily using max heap
                 #Check if there is an element with cost that fits in budget
-                while len(self.maxHeap1Guess) > 1 and (min(key[2] for key in self.maxHeap1Guess) <= (self.B - curr_cost)):
+                while len(self.maxHeap1Guess) > 0 and (min(key[2] for key in self.maxHeap1Guess) <= (self.B - curr_cost)):
                     
                     #Pop best item from maxHeap and compute marginal gain
                     top_item_key = heappop(self.maxHeap1Guess)
@@ -476,8 +479,11 @@ class paretoKnapsackRestaurants():
                     top_item_marginal_gain = (objective_with_top_item - self.computeSolutionObjective(curr_solution_items))/top_item_cost
 
                     #Check item now on top - 2nd item on heap
-                    second_item = self.maxHeap1Guess[0] 
-                    second_item_heap_gain = second_item[0]*-1
+                    if len(self.maxHeap1Guess) > 0:
+                        second_item = self.maxHeap1Guess[0]
+                        second_item_heap_gain = second_item[0]*-1
+                    else:
+                        second_item_heap_gain = float("-inf")
 
                     #If marginal gain of top item is better we add to solution
                     if top_item_marginal_gain >= second_item_heap_gain:
@@ -553,7 +559,7 @@ class paretoKnapsackRestaurants():
                 
                 #Assign items greedily using max heap
                 #Check if there is an element with cost that fits in budget
-                while len(self.maxHeap1Guess) > 1 and (min(key[2] for key in self.maxHeap1Guess) <= (self.B - curr_cost)):
+                while len(self.maxHeap1Guess) > 0 and (min(key[2] for key in self.maxHeap1Guess) <= (self.B - curr_cost)):
                     
                     #Pop best item from maxHeap and compute marginal gain
                     top_item_key = heappop(self.maxHeap1Guess)
@@ -563,8 +569,11 @@ class paretoKnapsackRestaurants():
                     top_item_marginal_gain = (objective_with_top_item - self.computeSolutionObjective(curr_solution_items))/top_item_cost
 
                     #Check item now on top - 2nd item on heap
-                    second_item = self.maxHeap1Guess[0] 
-                    second_item_heap_gain = second_item[0]*-1
+                    if len(self.maxHeap1Guess) > 0:
+                        second_item = self.maxHeap1Guess[0]
+                        second_item_heap_gain = second_item[0]*-1
+                    else:
+                        second_item_heap_gain = float("-inf")
 
                     #If marginal gain of top item is better we add to solution
                     if top_item_marginal_gain >= second_item_heap_gain:
@@ -599,3 +608,191 @@ class paretoKnapsackRestaurants():
         logging.debug("Prefix Pareto Greedy - 1 Guess Runtime = {:.2f} seconds".format(runTime))
 
         return prunedBudgets, prunedobjectives, cost_objective_map, runTime
+
+
+    def coverage_epsilon_grid(self):
+        '''
+        Linear objective sweep: for each discrete objective level, find a minimum-cost
+        solution using weighted greedy (marginal gain scaled by cost).
+        Then prune dominated solutions.
+        '''
+        startTime = time.perf_counter()
+
+        # Upper bound on objective (using all items)
+        max_objective = self.computeSolutionObjective(list(range(self.n)))
+
+        # Minimum objective among single items
+        min_objective = min(self.computeSolutionObjective([i]) for i in range(self.n))
+
+        # Discrete objective targets: (1 + epsilon) grid from min to max
+        epsilon = 0.1
+        target_objectives = []
+        curr_obj = min_objective
+        while curr_obj < max_objective:
+            target_objectives.append(curr_obj)
+            curr_obj *= (1 + epsilon)
+        target_objectives.append(max_objective)
+        logging.info(
+            "CoverageLinear epsilon grid: eps=%.3f, min_obj=%.3f, max_obj=%.3f, points=%d",
+            epsilon,
+            min_objective,
+            max_objective,
+            len(target_objectives),
+        )
+
+        # Track best solution per target objective
+        cost_objective_map = {}
+
+        for obj_x in target_objectives:
+            # Reset for each target objective
+            self.createItemMaxHeap()
+
+            curr_solution_items = []
+            curr_objective, curr_cost = 0, 0
+
+            # Weighted greedy until reaching target objective or no feasible item
+            while len(self.maxHeap) > 0 and (min(key[2] for key in self.maxHeap) <= (self.B - curr_cost)) and (curr_objective < obj_x):
+                top_item_key = heappop(self.maxHeap)
+                top_item_indx, top_item_cost = top_item_key[1], top_item_key[2]
+
+                objective_with_top_item = self.computeSolutionObjective(curr_solution_items + [top_item_indx])
+                top_item_marginal_gain = (objective_with_top_item - curr_objective) / top_item_cost
+
+                # Compare against next best heap gain
+                if len(self.maxHeap) > 0:
+                    second_item = self.maxHeap[0]
+                    second_item_heap_gain = second_item[0] * -1
+                else:
+                    second_item_heap_gain = float("-inf")
+
+                if top_item_marginal_gain >= second_item_heap_gain:
+                    if top_item_cost + curr_cost <= self.B:
+                        curr_solution_items.append(top_item_indx)
+                        curr_objective = objective_with_top_item
+                        curr_cost += top_item_cost
+                        logging.debug("Adding item {}, curr_objective={:.3f}, curr_cost={}".format(self.items[top_item_indx], curr_objective, curr_cost))
+                else:
+                    updated_top_item = (top_item_marginal_gain * -1, top_item_indx, top_item_cost)
+                    heappush(self.maxHeap, updated_top_item)
+
+            # Store if target met within budget
+            if curr_objective >= obj_x:
+                if obj_x not in cost_objective_map or curr_cost < cost_objective_map[obj_x][0]:
+                    cost_objective_map[obj_x] = [curr_cost, curr_solution_items.copy()]
+
+        # Prune dominated solutions: keep strictly increasing objective as cost increases
+        prunedBudgets, prunedobjectives = [], []
+        pairs = [(data[0], obj) for obj, data in cost_objective_map.items()]
+        pairs.sort(key=lambda x: x[0])  # sort by cost
+        best_obj = -1.0
+        for cost, obj in pairs:
+            if obj > best_obj:
+                best_obj = obj
+                prunedBudgets.append(cost)
+                prunedobjectives.append(obj)
+                logging.debug("Approx. Pareto Objective: {}, Cost: {}, Items: {}".format(obj, cost, cost_objective_map[obj][1]))
+
+        runTime = time.perf_counter() - startTime
+        logging.debug("Coverage Linear Runtime = {:.2f} seconds".format(runTime))
+
+        return prunedBudgets, prunedobjectives, cost_objective_map, runTime
+
+
+    def cost_epsilon_grid(self):
+        '''
+        Cost grid sweep: construct a (1 + epsilon) grid from minimum feasible cost
+        to maximum budget, run 2-Guess Plain Greedy at each budget, then prune
+        dominated solutions by cost.
+        '''
+        startTime = time.perf_counter()
+
+        # Minimum feasible cost among items
+        feasible_costs = [c for c in self.costs if c > 0 and c <= self.B]
+        min_cost = min(feasible_costs)
+
+        # Discrete cost targets: (1 + epsilon) grid from min to max budget
+        epsilon = 0.1
+        target_budgets = []
+        curr_cost = min_cost
+        while curr_cost < self.B:
+            target_budgets.append(curr_cost)
+            curr_cost *= (1 + epsilon)
+        
+        if len(target_budgets) == 0 or target_budgets[-1] < self.B:
+            target_budgets.append(self.B)
+
+        logging.info(
+            "Cost epsilon grid: eps=%.3f, min_cost=%.3f, max_budget=%.3f, points=%d",
+            epsilon,
+            min_cost,
+            self.B,
+            len(target_budgets),
+        )
+
+        # Track best objective per realized cost
+        cost_objective_map = {}
+        total_runtime = 0.0
+
+        original_budget = self.B
+        for budgetVal in target_budgets:
+            self.B = budgetVal
+            sol_items, curr_objective, curr_cost, runTime = self.twoGuessPlainGreedy()
+            total_runtime += runTime
+
+            if curr_cost not in cost_objective_map or curr_objective > cost_objective_map[curr_cost][0]:
+                cost_objective_map[curr_cost] = [curr_objective, sol_items.copy()]
+        
+        self.B = original_budget
+
+        # Prune dominated solutions: keep strictly increasing objective as cost increases
+        prunedBudgets, prunedobjectives = [], []
+        currentObjective = -1.0
+        for b_prime in sorted(cost_objective_map.keys()):
+            if cost_objective_map[b_prime][0] > currentObjective:
+                currentObjective = cost_objective_map[b_prime][0]
+                prunedBudgets.append(b_prime)
+                prunedobjectives.append(currentObjective)
+                logging.debug(
+                    "Cost grid Pareto: cost={}, objective={}, items={}".format(
+                        b_prime,
+                        cost_objective_map[b_prime][0],
+                        cost_objective_map[b_prime][1],
+                    )
+                )
+
+        runTime = time.perf_counter() - startTime
+        logging.debug("Cost epsilon grid Runtime = {:.2f} seconds".format(runTime))
+
+        return prunedBudgets, prunedobjectives, cost_objective_map, total_runtime
+    
+
+    def coverage_cost_grid_union_pareto(self, cost_solutions, coverage_solutions):
+        '''
+        Prune dominated solutions from the union of cost_epsilon_grid and
+        coverage_epsilon_grid outputs.
+        Args:
+            cost_solutions (tuple): (costs, objectives) from cost_epsilon_grid
+            coverage_solutions (tuple): (costs, objectives) from coverage_epsilon_grid
+        Returns:
+            pruned_costs (list): Pareto-optimal costs
+            pruned_objectives (list): Pareto-optimal objectives
+        '''
+        cost_costs, cost_objs = cost_solutions
+        cov_costs, cov_objs = coverage_solutions
+
+        pairs = list(zip(cost_costs, cost_objs)) + list(zip(cov_costs, cov_objs))
+        if len(pairs) == 0:
+            return [], []
+
+        # Sort by cost and keep strictly increasing objective
+        pairs.sort(key=lambda x: x[0])
+        pruned_costs, pruned_objectives = [], []
+        best_obj = float("-inf")
+        for cost, obj in pairs:
+            if obj > best_obj:
+                best_obj = obj
+                pruned_costs.append(cost)
+                pruned_objectives.append(obj)
+                logging.debug("Union Pareto: cost={}, objective={}".format(cost, obj))
+
+        return pruned_costs, pruned_objectives
