@@ -674,7 +674,7 @@ class paretoKnapsackInfluence():
         return prunedBudgets, prunedInfluences, cost_influence_map, runTime
 
 
-    def coverage_linear(self):
+    def F_Greedy(self):
         '''
         Linear influence sweep: for each discrete influence level, find a minimum-cost
         solution using weighted greedy (marginal gain scaled by cost).

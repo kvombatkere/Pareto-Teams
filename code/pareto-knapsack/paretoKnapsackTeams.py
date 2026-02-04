@@ -1,4 +1,5 @@
 import time, pickle
+import random
 from heapq import heappop, heappush, heapify
 import numpy as np
 import matplotlib.cm as cm
@@ -28,7 +29,7 @@ class paretoKnapsackTeams():
 
         self.experts = n_experts
         self.m, self.n = size_univ, len(self.experts)
-        self.costs = costs
+        self.costs = costs[:self.n]
         self.B = budget
         logging.debug("Initialized Pareto Coverage - Knapsack Cost Instance, Task:{}, Num Experts:{}, Budget={}".format(self.task, self.n, self.B))
 
@@ -215,10 +216,11 @@ class paretoKnapsackTeams():
         return best_experts_list, sol_skills, best_coverage, best_cost, runTime
 
 
-    def top_k(self, k_val):
+    def top_k(self):
         '''
-        Top-k heuristic: select k experts by highest cost-scaled marginal gain
-        with respect to the empty set (i.e., individual coverage / cost).
+        Budget-threshold heuristic: select experts by highest cost-scaled marginal gain
+        with respect to the empty set (i.e., individual coverage / cost),
+        adding experts until the budget is exhausted.
         Only considers experts that are individually within the budget.
         '''
         startTime = time.perf_counter()
@@ -230,13 +232,11 @@ class paretoKnapsackTeams():
                 expert_cov = len(set(expert_i).intersection(self.task_skills)) / len(self.task)
                 expert_scores.append((expert_cov / self.costs[i], i))
 
-        #Sort by score descending and select up to k within budget
+        #Sort by score descending and select until budget is exhausted
         expert_scores.sort(key=lambda x: x[0], reverse=True)
         selected_indices = []
         curr_cost = 0
         for _, idx in expert_scores:
-            if len(selected_indices) >= max(0, k_val):
-                break
             if curr_cost + self.costs[idx] <= self.B:
                 selected_indices.append(idx)
                 curr_cost += self.costs[idx]
@@ -250,7 +250,38 @@ class paretoKnapsackTeams():
 
         curr_coverage = len(solution_skills.intersection(self.task_skills)) / len(self.task) if len(self.task) > 0 else 0
         runTime = time.perf_counter() - startTime
-        logging.debug("Top-k (cost-scaled, budget-feasible) Solution for k:{}, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(k_val, curr_coverage, curr_cost, runTime))
+        logging.debug("Top-k (cost-scaled, budget-feasible) Solution, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(curr_coverage, curr_cost, runTime))
+
+        return solution_experts, solution_skills, curr_coverage, curr_cost, runTime
+
+
+    def random_heuristic(self):
+        '''
+        Random heuristic: randomly select experts until the budget is exhausted.
+        Only considers experts that are individually within the budget.
+        '''
+        startTime = time.perf_counter()
+
+        eligible_indices = [i for i, c in enumerate(self.costs) if 0 < c <= self.B]
+        random.shuffle(eligible_indices)
+
+        selected_indices = []
+        curr_cost = 0
+        for idx in eligible_indices:
+            if curr_cost + self.costs[idx] <= self.B:
+                selected_indices.append(idx)
+                curr_cost += self.costs[idx]
+
+        #Build solution
+        solution_skills = set()
+        solution_experts = []
+        for idx in selected_indices:
+            solution_experts.append(self.experts[idx])
+            solution_skills = solution_skills.union(set(self.experts[idx]))
+
+        curr_coverage = len(solution_skills.intersection(self.task_skills)) / len(self.task) if len(self.task) > 0 else 0
+        runTime = time.perf_counter() - startTime
+        logging.debug("Random (budget-feasible) Solution, Coverage:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(curr_coverage, curr_cost, runTime))
 
         return solution_experts, solution_skills, curr_coverage, curr_cost, runTime
     
@@ -676,7 +707,7 @@ class paretoKnapsackTeams():
         return prunedBudgets, prunedCoverages, cost_coverage_map, runTime
     
 
-    def coverage_linear(self):
+    def F_Greedy(self):
         '''
         Linear coverage sweep: for each discrete coverage level, find a minimum-cost
         solution using weighted greedy (marginal gain scaled by cost).
