@@ -736,7 +736,7 @@ class paretoKnapsackRestaurants():
         original_budget = self.B
         for budgetVal in target_budgets:
             self.B = budgetVal
-            sol_items, curr_objective, curr_cost, runTime = self.twoGuessPlainGreedy()
+            sol_items, curr_objective, curr_cost, runTime = self.oneGuessGreedyPlus()
             total_runtime += runTime
 
             if curr_cost not in cost_objective_map or curr_objective > cost_objective_map[curr_cost][0]:
