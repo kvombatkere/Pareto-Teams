@@ -235,10 +235,11 @@ class paretoKnapsackInfluence():
         return best_nodes_list, best_influence, best_cost, runTime
 
 
-    def top_k(self, k_val):
+    def top_k(self):
         '''
-        Top-k heuristic: select k nodes by highest cost-scaled marginal gain
-        with respect to the empty set (i.e., influence of single node / cost).
+        Budget-threshold heuristic: select nodes by highest cost-scaled marginal gain
+        with respect to the empty set (i.e., influence of single node / cost),
+        adding nodes until the budget is exhausted.
         Only considers nodes that are individually within the budget.
         '''
         startTime = time.perf_counter()
@@ -254,8 +255,6 @@ class paretoKnapsackInfluence():
         selected_indices = []
         curr_cost = 0.0
         for _, idx in node_scores:
-            if len(selected_indices) >= max(0, k_val):
-                break
             node = self.nodes[idx]
             cost = self.node_costs[node]
             if curr_cost + cost <= self.B:
@@ -266,7 +265,7 @@ class paretoKnapsackInfluence():
         curr_influence = self.compute_influence(solution_nodes) if solution_nodes else 0
 
         runTime = time.perf_counter() - startTime
-        logging.debug("Top-k (cost-scaled, budget-feasible) Solution for k:{}, Influence:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(k_val, curr_influence, curr_cost, runTime))
+        logging.debug("Top-k (cost-scaled, budget-feasible) Solution, Influence:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(curr_influence, curr_cost, runTime))
 
         return solution_nodes, curr_influence, curr_cost, runTime
     
