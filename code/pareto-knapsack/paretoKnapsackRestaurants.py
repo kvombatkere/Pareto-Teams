@@ -180,10 +180,11 @@ class paretoKnapsackRestaurants():
         return best_items_list, best_objective, best_cost, runTime
 
 
-    def top_k(self, k_val):
+    def top_k(self):
         '''
-        Top-k heuristic: select k items by highest cost-scaled marginal gain
-        with respect to the empty set (i.e., sum of similarities / cost).
+        Budget-threshold heuristic: select items by highest cost-scaled marginal gain
+        with respect to the empty set (i.e., sum of similarities / cost),
+        adding items until the budget is exhausted.
         Only considers items that are individually within the budget.
         '''
         startTime = time.perf_counter()
@@ -199,8 +200,6 @@ class paretoKnapsackRestaurants():
         selected_indices = []
         curr_cost = 0.0
         for _, idx in item_scores:
-            if len(selected_indices) >= max(0, k_val):
-                break
             if curr_cost + self.costs[idx] <= self.B:
                 selected_indices.append(idx)
                 curr_cost += self.costs[idx]
@@ -208,7 +207,7 @@ class paretoKnapsackRestaurants():
         curr_objective = self.computeSolutionObjective(selected_indices) if selected_indices else 0
 
         runTime = time.perf_counter() - startTime
-        logging.debug("Top-k (cost-scaled, budget-feasible) Solution for k:{}, Objective:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(k_val, curr_objective, curr_cost, runTime))
+        logging.debug("Top-k (cost-scaled, budget-feasible) Solution, Objective:{:.3f}, Cost:{}, Runtime = {:.2f} seconds".format(curr_objective, curr_cost, runTime))
 
         return selected_indices, curr_objective, curr_cost, runTime
     
@@ -766,7 +765,7 @@ class paretoKnapsackRestaurants():
         return prunedBudgets, prunedobjectives, cost_objective_map, total_runtime
     
 
-    def coverage_cost_grid_union_pareto(self, cost_solutions, coverage_solutions):
+    def FC_Greedy(self):
         '''
         Prune dominated solutions from the union of cost_epsilon_grid and
         coverage_epsilon_grid outputs.
@@ -776,13 +775,12 @@ class paretoKnapsackRestaurants():
         Returns:
             pruned_costs (list): Pareto-optimal costs
             pruned_objectives (list): Pareto-optimal objectives
+            total_runtime (float): sum of cost and coverage runtimes
         '''
-        cost_costs, cost_objs = cost_solutions
-        cov_costs, cov_objs = coverage_solutions
+        cost_costs, cost_objs, cost_objective_map, cost_runtime = self.cost_epsilon_grid()
+        cov_costs, cov_objs, cov_objective_map, cov_runtime = self.coverage_epsilon_grid()
 
         pairs = list(zip(cost_costs, cost_objs)) + list(zip(cov_costs, cov_objs))
-        if len(pairs) == 0:
-            return [], []
 
         # Sort by cost and keep strictly increasing objective
         pairs.sort(key=lambda x: x[0])
@@ -795,4 +793,6 @@ class paretoKnapsackRestaurants():
                 pruned_objectives.append(obj)
                 logging.debug("Union Pareto: cost={}, objective={}".format(cost, obj))
 
-        return pruned_costs, pruned_objectives
+        total_runtime = float(cost_runtime) + float(cov_runtime)
+
+        return pruned_costs, pruned_objectives, total_runtime
