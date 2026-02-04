@@ -252,7 +252,7 @@ def createGraph(data_path_file):
     # Convert to undirected for influence spread (assuming undirected propagation)
     G_undir = G.to_undirected()
 
-    # Take the two largest connected components (prefer components with size <= 1000)
+    # Take the 10 largest connected components (prefer components with size <= 1000)
     if len(G_undir) > 0:
         components = [cc for cc in nx.connected_components(G_undir) if len(cc) <= 1000]
         if not components:
