@@ -592,28 +592,28 @@ class paretoKnapsackTeams():
                 seed_i_coverage, seed_i_cost = curr_coverage, curr_cost
                 seed_i_experts, seed_i_skills = solution_experts.copy(), solution_skills
 
-                feasible_expert_list, feasible_expert_skills, feasible_expert_cost = [], set(), 0
-                #Perform Greedy+ check - Loop over solution in each iteration of plain greedy
-                for i, expert_i in enumerate(solution_experts):
-                    feasible_expert_list.append(expert_i)
-                    feasible_expert_skills = feasible_expert_skills.union(set(expert_i))
-                    feasible_expert_cost += self.costs[self.experts.index(expert_i)]
-                    logging.debug("Trying incremental solution:{}, cost:{}".format(feasible_expert_list, feasible_expert_cost))
+                # feasible_expert_list, feasible_expert_skills, feasible_expert_cost = [], set(), 0
+                # #Perform Greedy+ check - Loop over solution in each iteration of plain greedy
+                # for i, expert_i in enumerate(solution_experts):
+                #     feasible_expert_list.append(expert_i)
+                #     feasible_expert_skills = feasible_expert_skills.union(set(expert_i))
+                #     feasible_expert_cost += self.costs[self.experts.index(expert_i)]
+                #     logging.debug("Trying incremental solution:{}, cost:{}".format(feasible_expert_list, feasible_expert_cost))
                     
-                    for j, E_j in enumerate(self.experts):
-                        #If adding a single expert doesn't violate budget
-                        if feasible_expert_cost + self.costs[j] <= self.B:
-                            #Compute coverage by adding expert to incremental solution
-                            added_expert_cov = len((feasible_expert_skills.union(set(E_j))).intersection(self.task_skills))/len(self.task)
+                #     for j, E_j in enumerate(self.experts):
+                #         #If adding a single expert doesn't violate budget
+                #         if feasible_expert_cost + self.costs[j] <= self.B:
+                #             #Compute coverage by adding expert to incremental solution
+                #             added_expert_cov = len((feasible_expert_skills.union(set(E_j))).intersection(self.task_skills))/len(self.task)
                             
-                            #If this solution is better than original solution, store it
-                            if added_expert_cov > seed_i_coverage:
-                                seed_i_experts = feasible_expert_list.copy()
-                                seed_i_experts.append(E_j)
-                                seed_i_coverage = added_expert_cov
-                                seed_i_cost = feasible_expert_cost + self.costs[j]
-                                logging.debug("New feasible seed solution yielded better coverage! {}, coverage={:.3f}, cost={}".format(seed_i_experts,
-                                                                                                                                       seed_i_coverage, seed_i_cost))
+                #             #If this solution is better than original solution, store it
+                #             if added_expert_cov > seed_i_coverage:
+                #                 seed_i_experts = feasible_expert_list.copy()
+                #                 seed_i_experts.append(E_j)
+                #                 seed_i_coverage = added_expert_cov
+                #                 seed_i_cost = feasible_expert_cost + self.costs[j]
+                #                 logging.debug("New feasible seed solution yielded better coverage! {}, coverage={:.3f}, cost={}".format(seed_i_experts,
+                #                                                                                               seed_i_coverage, seed_i_cost))
                                 
                 #Store best solution for seed i
                 logging.debug("Best solution for seed {}, experts:{}, coverage={:.3f}, cost={}".format(i, seed_i_experts, seed_i_coverage, seed_i_cost))
@@ -710,7 +710,7 @@ class paretoKnapsackTeams():
     def F_Greedy(self):
         '''
         Linear coverage sweep: for each discrete coverage level, find a minimum-cost
-        solution using weighted greedy (marginal gain scaled by cost).
+        solution using weighted greedy (marginal gain scaled by cost) with seed size 1.
         Then prune dominated solutions.
         '''
         startTime = time.perf_counter()
@@ -725,43 +725,49 @@ class paretoKnapsackTeams():
         cost_coverage_map = {}
 
         for cov_x in target_coverages:
-            # Reset for each target coverage
-            self.createExpertCoverageMaxHeap()
+            # Try all single-expert seeds for this target coverage
+            for i, expert_i in enumerate(self.experts):
+                if self.costs[i] > self.B:
+                    continue
 
-            solution_skills = set()
-            solution_experts = []
-            curr_coverage, curr_cost = 0, 0
+                curr_coverage, curr_cost = self.createmaxHeap1Guess(
+                    seed_expert=expert_i,
+                    seed_expert_cost=self.costs[i],
+                    seed_expert_index=i
+                )
+                solution_skills = set(expert_i)
+                solution_experts = [expert_i]
 
-            # Weighted greedy until reaching target coverage or no feasible expert
-            while len(self.maxHeap) > 1 and (min(key[2] for key in self.maxHeap) <= (self.B - curr_cost)) and (curr_coverage < cov_x):
-                top_expert_key = heappop(self.maxHeap)
-                top_expert_indx, top_expert_cost = top_expert_key[1], top_expert_key[2]
-                top_expert_skills = set(self.experts[top_expert_indx])
+                # Weighted greedy until reaching target coverage or no feasible expert
+                while len(self.maxHeap1Guess) > 1 and (min(key[2] for key in self.maxHeap1Guess) <= (self.B - curr_cost)) and (curr_coverage < cov_x):
+                    top_expert_key = heappop(self.maxHeap1Guess)
+                    top_expert_indx, top_expert_cost = top_expert_key[1], top_expert_key[2]
+                    top_expert_skills = set(self.experts[top_expert_indx])
 
-                sol_with_top_expert = solution_skills.union(top_expert_skills)
-                coverage_with_top_expert = len(sol_with_top_expert.intersection(self.task_skills)) / len(self.task)
-                top_expert_marginal_gain = (coverage_with_top_expert - curr_coverage) / top_expert_cost
+                    sol_with_top_expert = solution_skills.union(top_expert_skills)
+                    coverage_with_top_expert = len(sol_with_top_expert.intersection(self.task_skills)) / len(self.task)
+                    top_expert_marginal_gain = (coverage_with_top_expert - curr_coverage) / top_expert_cost
 
-                # Compare against next best heap gain
-                second_expert = self.maxHeap[0]
-                second_expert_heap_gain = second_expert[0] * -1
+                    # Compare against next best heap gain
+                    second_expert = self.maxHeap1Guess[0]
+                    second_expert_heap_gain = second_expert[0] * -1
 
-                if top_expert_marginal_gain >= second_expert_heap_gain:
-                    if top_expert_cost + curr_cost <= self.B:
-                        solution_skills = solution_skills.union(top_expert_skills)
-                        solution_experts.append(self.experts[top_expert_indx])
-                        curr_coverage = coverage_with_top_expert
-                        curr_cost += top_expert_cost
-                        logging.debug("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
-                else:
-                    updated_top_expert = (top_expert_marginal_gain * -1, top_expert_indx, top_expert_cost)
-                    heappush(self.maxHeap, updated_top_expert)
+                    if top_expert_marginal_gain >= second_expert_heap_gain:
+                        if top_expert_cost + curr_cost <= self.B:
+                            solution_skills = solution_skills.union(top_expert_skills)
+                            solution_experts.append(self.experts[top_expert_indx])
+                            curr_coverage = coverage_with_top_expert
+                            curr_cost += top_expert_cost
+                            logging.debug("Adding expert {}, curr_coverage={:.3f}, curr_cost={}".format(self.experts[top_expert_indx], curr_coverage, curr_cost))
+                    else:
+                        updated_top_expert = (top_expert_marginal_gain * -1, top_expert_indx, top_expert_cost)
+                        heappush(self.maxHeap1Guess, updated_top_expert)
 
-            # Store if target met within budget
-            if curr_coverage >= cov_x:
-                # Keep minimum cost for this coverage
-                if cov_x not in cost_coverage_map or curr_cost < cost_coverage_map[cov_x][0]:
-                    cost_coverage_map[cov_x] = [curr_cost, solution_experts.copy()]
+                # Store if target met within budget
+                if curr_coverage >= cov_x:
+                    # Keep minimum cost for this coverage
+                    if cov_x not in cost_coverage_map or curr_cost < cost_coverage_map[cov_x][0]:
+                        cost_coverage_map[cov_x] = [curr_cost, solution_experts.copy()]
 
         # Prune dominated solutions: keep strictly increasing coverage as cost increases
         prunedBudgets, prunedCoverages = [], []

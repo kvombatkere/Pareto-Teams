@@ -500,27 +500,27 @@ class paretoKnapsackRestaurants():
 
                 #Store results for run with seed i
                 seed_i_objective, seed_i_cost, seed_i_items = curr_objective, curr_cost, curr_solution_items.copy()
-                feasible_item_list, feasible_item_cost = [], 0
-
-                #Perform Greedy+ check - Loop over solution in each iteration of plain greedy
-                for i, item_i in enumerate(seed_i_items):
-                    feasible_item_list.append(item_i)
-                    feasible_item_cost += self.costs[item_i]
-                    logging.debug("Trying incremental solution:{}, cost:{}".format(feasible_item_list, feasible_item_cost))
+                
+                # feasible_item_list, feasible_item_cost = [], 0
+                # #Perform Greedy+ check - Loop over solution in each iteration of plain greedy
+                # for i, item_i in enumerate(seed_i_items):
+                #     feasible_item_list.append(item_i)
+                #     feasible_item_cost += self.costs[item_i]
+                #     logging.debug("Trying incremental solution:{}, cost:{}".format(feasible_item_list, feasible_item_cost))
                     
-                    for j, item_j in enumerate(self.items):
-                        #If adding a single item doesn't violate budget
-                        if feasible_item_cost + self.costs[j] <= self.B:
-                            #Compute objective by adding item to incremental solution
-                            added_item_obj = self.computeSolutionObjective(feasible_item_list + [j])
+                #     for j, item_j in enumerate(self.items):
+                #         #If adding a single item doesn't violate budget
+                #         if feasible_item_cost + self.costs[j] <= self.B:
+                #             #Compute objective by adding item to incremental solution
+                #             added_item_obj = self.computeSolutionObjective(feasible_item_list + [j])
                             
-                            #If this solution is better than original solution, store it
-                            if added_item_obj > best_objective:
-                                seed_i_items = feasible_item_list.copy()
-                                seed_i_items.append(j)
-                                seed_i_objective = added_item_obj
-                                seed_i_cost = feasible_item_cost + self.costs[j]
-                                logging.debug("New feasible solution yielded better objective! {}, objective={:.3f}, cost={}".format(seed_i_items,seed_i_objective,seed_i_cost))
+                #             #If this solution is better than original solution, store it
+                #             if added_item_obj > best_objective:
+                #                 seed_i_items = feasible_item_list.copy()
+                #                 seed_i_items.append(j)
+                #                 seed_i_objective = added_item_obj
+                #                 seed_i_cost = feasible_item_cost + self.costs[j]
+                #                 logging.debug("New feasible solution yielded better objective! {}, objective={:.3f}, cost={}".format(seed_i_items,seed_i_objective,seed_i_cost))
 
                 #Keep track of best solution across all seeds
                 if seed_i_objective > best_objective:
