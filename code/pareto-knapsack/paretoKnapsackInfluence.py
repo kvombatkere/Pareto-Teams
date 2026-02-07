@@ -562,26 +562,25 @@ class paretoKnapsackInfluence():
                 #Store results for run with seed i
                 seed_i_influence, seed_i_cost = curr_influence, curr_cost
                 seed_i_nodes = solution_nodes.copy()
+                # #Perform Greedy+ check - Loop over solution in each iteration of plain greedy
+                # for j, node_j in enumerate(solution_nodes):
+                #     feasible_nodes = solution_nodes[:j+1]
+                #     feasible_cost = sum(self.node_costs[node] for node in feasible_nodes)
+                #     logging.debug("Trying incremental solution:{}, cost:{}".format(feasible_nodes, feasible_cost))
 
-                #Perform Greedy+ check - Loop over solution in each iteration of plain greedy
-                for j, node_j in enumerate(solution_nodes):
-                    feasible_nodes = solution_nodes[:j+1]
-                    feasible_cost = sum(self.node_costs[node] for node in feasible_nodes)
-                    logging.debug("Trying incremental solution:{}, cost:{}".format(feasible_nodes, feasible_cost))
+                #     for k, node_k in enumerate(self.nodes):
+                #         #If adding a single node doesn't violate budget
+                #         if node_k not in feasible_nodes and feasible_cost + self.node_costs[node_k] <= self.B:
+                #             #Compute influence by adding node to incremental solution
+                #             added_influence = self.compute_influence(feasible_nodes + [node_k])
 
-                    for k, node_k in enumerate(self.nodes):
-                        #If adding a single node doesn't violate budget
-                        if node_k not in feasible_nodes and feasible_cost + self.node_costs[node_k] <= self.B:
-                            #Compute influence by adding node to incremental solution
-                            added_influence = self.compute_influence(feasible_nodes + [node_k])
-
-                            #If this solution is better than original solution, store it
-                            if added_influence > seed_i_influence:
-                                seed_i_nodes = feasible_nodes + [node_k]
-                                seed_i_influence = added_influence
-                                seed_i_cost = feasible_cost + self.node_costs[node_k]
-                                logging.debug("New feasible seed solution yielded better influence! {}, influence={:.3f}, cost={}".format(seed_i_nodes,
-                                                                                                                                       seed_i_influence, seed_i_cost))
+                #             #If this solution is better than original solution, store it
+                #             if added_influence > seed_i_influence:
+                #                 seed_i_nodes = feasible_nodes + [node_k]
+                #                 seed_i_influence = added_influence
+                #                 seed_i_cost = feasible_cost + self.node_costs[node_k]
+                #                 logging.debug("New feasible seed solution yielded better influence! {}, influence={:.3f}, cost={}".format(seed_i_nodes,
+                #                                                                                                                        seed_i_influence, seed_i_cost))
 
                 #Store best solution for seed i
                 logging.debug("Best solution for seed {}, nodes:{}, influence={:.3f}, cost={}".format(i, seed_i_nodes, seed_i_influence, seed_i_cost))
@@ -676,7 +675,7 @@ class paretoKnapsackInfluence():
     def F_Greedy(self):
         '''
         Linear influence sweep: for each discrete influence level, find a minimum-cost
-        solution using weighted greedy (marginal gain scaled by cost).
+        solution using weighted greedy (marginal gain scaled by cost) with seed size 1.
         Then prune dominated solutions.
         '''
         startTime = time.perf_counter()
@@ -697,39 +696,45 @@ class paretoKnapsackInfluence():
         cost_influence_map = {}
 
         for infl_x in target_influences:
-            # Reset for each target influence
-            self.createNodeInfluenceMaxHeap()
+            # Try all single-node seeds for this target influence
+            for i, node_i in enumerate(self.nodes):
+                if self.node_costs[node_i] > self.B:
+                    continue
 
-            curr_solution_nodes = []
-            curr_influence, curr_cost = 0.0, 0.0
+                curr_influence, curr_cost = self.createmaxHeap1Guess(
+                    seed_node=node_i,
+                    seed_node_cost=self.node_costs[node_i],
+                    seed_node_index=i
+                )
+                curr_solution_nodes = [node_i]
 
-            # Weighted greedy until reaching target influence or no feasible node
-            while len(self.maxHeap) > 1 and (min(key[2] for key in self.maxHeap) <= (self.B - curr_cost)) and (curr_influence < infl_x):
-                top_node_key = heappop(self.maxHeap)
-                top_node_indx, top_node_cost = top_node_key[1], top_node_key[2]
-                top_node = self.nodes[top_node_indx]
+                # Weighted greedy until reaching target influence or no feasible node
+                while len(self.maxHeap1Guess) > 1 and (min(key[2] for key in self.maxHeap1Guess) <= (self.B - curr_cost)) and (curr_influence < infl_x):
+                    top_node_key = heappop(self.maxHeap1Guess)
+                    top_node_indx, top_node_cost = top_node_key[1], top_node_key[2]
+                    top_node = self.nodes[top_node_indx]
 
-                influence_with_top_node = self.compute_influence(curr_solution_nodes + [top_node])
-                top_node_marginal_gain = (influence_with_top_node - curr_influence) / top_node_cost
+                    influence_with_top_node = self.compute_influence(curr_solution_nodes + [top_node])
+                    top_node_marginal_gain = (influence_with_top_node - curr_influence) / top_node_cost
 
-                # Compare against next best heap gain
-                second_node = self.maxHeap[0]
-                second_node_heap_gain = second_node[0] * -1
+                    # Compare against next best heap gain
+                    second_node = self.maxHeap1Guess[0]
+                    second_node_heap_gain = second_node[0] * -1
 
-                if top_node_marginal_gain >= second_node_heap_gain:
-                    if top_node_cost + curr_cost <= self.B:
-                        curr_solution_nodes.append(top_node)
-                        curr_influence = influence_with_top_node
-                        curr_cost += top_node_cost
-                        logging.debug("Adding node {}, curr_influence={:.3f}, curr_cost={}".format(top_node, curr_influence, curr_cost))
-                else:
-                    updated_top_node = (top_node_marginal_gain * -1, top_node_indx, top_node_cost)
-                    heappush(self.maxHeap, updated_top_node)
+                    if top_node_marginal_gain >= second_node_heap_gain:
+                        if top_node_cost + curr_cost <= self.B:
+                            curr_solution_nodes.append(top_node)
+                            curr_influence = influence_with_top_node
+                            curr_cost += top_node_cost
+                            logging.debug("Adding node {}, curr_influence={:.3f}, curr_cost={}".format(top_node, curr_influence, curr_cost))
+                    else:
+                        updated_top_node = (top_node_marginal_gain * -1, top_node_indx, top_node_cost)
+                        heappush(self.maxHeap1Guess, updated_top_node)
 
-            # Store if target met within budget
-            if curr_influence >= infl_x:
-                if infl_x not in cost_influence_map or curr_cost < cost_influence_map[infl_x][0]:
-                    cost_influence_map[infl_x] = [curr_cost, curr_solution_nodes.copy()]
+                # Store if target met within budget
+                if curr_influence >= infl_x:
+                    if infl_x not in cost_influence_map or curr_cost < cost_influence_map[infl_x][0]:
+                        cost_influence_map[infl_x] = [curr_cost, curr_solution_nodes.copy()]
 
         # Prune dominated solutions: keep strictly increasing influence as cost increases
         prunedBudgets, prunedInfluences = [], []
@@ -770,9 +775,9 @@ def createGraph(data_path_file):
     # Convert to undirected for influence spread (assuming undirected propagation)
     G_undir = G.to_undirected()
 
-    # Take only the largest connected component with size <= 5000
+    # Take only the largest connected component with size <= 500
     if len(G_undir) > 0:
-        components = [cc for cc in nx.connected_components(G_undir) if len(cc) <= 200]
+        components = [cc for cc in nx.connected_components(G_undir) if len(cc) <= 500]
         if components:
             largest_cc = max(components, key=len)
         else:
