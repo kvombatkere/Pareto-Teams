@@ -14,3 +14,10 @@
 \\dataset{Yelp_Phoenix} & 508.800 & 14.900 & 393.500 & 5.300 \\
 \\dataset{Yelp_Phoenix} & 263.600 & 15.200 & 197.800 & 3.400 \\
 \\dataset{Yelp_Phoenix} & 749.700 & 14.900 & 585.500 & 6.700 \\
+\\dataset{Yelp_Phoenix} & 743.400 & 17.600 & 585.100 & 7.600 \\
+\\dataset{Yelp_Phoenix} & 1179.800 & 17.800 & 968.600 & 9.700 \\
+\\dataset{NetPHY} & 8.500 & 2.500 & 3.000 & 3.000 \\
+\\dataset{Yelp_Vegas} & 1495.600 & 18.700 & 1151.200 & 10.200 \\
+\\dataset{NetHEPT} & 26.500 & 3.000 & 3.000 & 4.000 \\
+\\dataset{Yelp_Phoenix} & 961.100 & 15.000 & 776.700 & 9.500 \\
+\\dataset{Yelp_Vegas} & 1495.200 & 19.900 & 1149.900 & 7.100 \\

@@ -511,7 +511,7 @@ def createGraph(data_path_file):
         G_undir = G_undir.subgraph(selected_nodes).copy()
 
     for u, v in G_undir.edges():
-        G_undir[u][v]['weight'] = 0.1
+        G_undir[u][v]['weight'] = 0.01
 
     return G_undir
 
