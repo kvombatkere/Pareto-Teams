@@ -324,7 +324,7 @@ class paretoGraph():
         return diameters, best_coverages, best_centers, best_included_lists, runTime
 
 
-    def topKDistanceScaled(self, diameter_values=None):
+    def topKDegree(self):
         '''
         Top-K baseline: compute a single ordering by highest degree
         (sum of edge weights), then add nodes in that order and track the
@@ -356,6 +356,7 @@ class paretoGraph():
 
         included = []
         covered_skills = set()
+        last_diam = None
         for idx in ordered_indices:
             # Add next highest-degree node in order
             included.append(idx)
@@ -363,9 +364,15 @@ class paretoGraph():
             # Track diameter and coverage after each addition
             curr_diam = self._compute_diameter_from_indices(self.pairwise_costs, included)
             curr_cov = self._compute_coverage(task_size, task_skills=task_skills, covered_skills=covered_skills)
-            seq_diams.append(curr_diam)
-            seq_covs.append(curr_cov)
-            seq_included.append(included.copy())
+            if last_diam is None or curr_diam != last_diam:
+                seq_diams.append(curr_diam)
+                seq_covs.append(curr_cov)
+                seq_included.append(included.copy())
+                last_diam = curr_diam
+            else:
+                # Same diameter: update coverage for this diameter step
+                seq_covs[-1] = curr_cov
+                seq_included[-1] = included.copy()
 
         # Baseline: no Pareto pruning
         diameters = seq_diams

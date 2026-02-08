@@ -253,7 +253,7 @@ class paretoGraphRestaurants:
 
         return seq_diams, seq_objs, [-1 for _ in seq_diams], seq_included, runTime
 
-    def topKDistanceScaled(self):
+    def topKDegree(self):
         '''
         Top-K baseline: compute a single ordering by highest degree
         (sum of edge weights), then add nodes in that order and track the
@@ -272,14 +272,21 @@ class paretoGraphRestaurants:
         included = []
         max_sims = np.zeros(n, dtype=float)
 
+        last_diam = None
         for idx in ordered_indices:
             included.append(idx)
             max_sims = np.maximum(max_sims, self.simMatrix[:, idx])
             curr_diam = self._compute_diameter_from_indices(self.pairwise_costs, included)
             curr_obj = self._objective_from_max_sims(max_sims)
-            seq_diams.append(curr_diam)
-            seq_objs.append(curr_obj)
-            seq_included.append(included.copy())
+            if last_diam is None or curr_diam != last_diam:
+                seq_diams.append(curr_diam)
+                seq_objs.append(curr_obj)
+                seq_included.append(included.copy())
+                last_diam = curr_diam
+            else:
+                # Same diameter: update objective for this diameter step
+                seq_objs[-1] = curr_obj
+                seq_included[-1] = included.copy()
 
         runTime = time.perf_counter() - startTime
         logging.info(
