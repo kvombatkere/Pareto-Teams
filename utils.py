@@ -3,52 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
 
-from sklearn.decomposition import TruncatedSVD
-from sklearn.manifold import TSNE
-
 import logging
 logging.basicConfig(format='%(asctime)s |%(levelname)s: %(message)s', level=logging.INFO)
-
-### Create Experts and Tasks
-#Function to create num_sets sets uniformly at random from universe
-def createUniformRandomSets(num_tasks, num_el, size_univ):
-    '''
-    Create num_sets sets with num_el elements drawn from [0, size_univ-1], sampled uniformly at random
-    '''
-    allSets = []
-    for i in range(num_tasks):
-        set_i = np.random.randint(low=0, high=size_univ-1, size=num_el)
-        allSets.append(list(set(set_i)))
-
-    return allSets
-
-
-#Function to create num_sets sets as per Normal Distribution from universe
-def createNormalRandomSets(num_tasks, num_el, size_univ):
-    '''
-    Create num_sets sets with num_el elements drawn from U, sampled from Normal Distribution
-    '''
-    allSets = []
-    for i in range(num_tasks):
-        set_i = np.random.normal(loc=size_univ/2, scale=size_univ/6, size=num_el)
-        set_i_clean = [int(val) for val in set_i if 0 <= val < size_univ]
-        allSets.append(list(set(set_i_clean)))
-
-    return allSets
-
-
-#Function to create num_sets sets as per Pareto Distribution from universe
-def createExponentialRandomSets(num_tasks, num_el, size_univ):
-    '''
-    Create num_sets sets with num_el elements drawn from U, sampled from Exponential Distribution
-    '''
-    allSets = []
-    for i in range(num_tasks):
-        set_i = np.random.geometric(p=0.07, size=num_el)
-        set_i_clean = [int(val) for val in set_i if 0 <= val < size_univ]
-        allSets.append(list(set(set_i_clean)))
-
-    return allSets
 
 
 def jaccard_similarity(set1, set2):
@@ -340,27 +296,6 @@ def baselineTopKEdgeWeights(experts, task, edge_weights_matrix, k, lambdaVal):
     return solutionObjective, solutionCoverage, edgeWeightCost
 
 
-def qMatrixSVD(q_mat, k = 25):
-    '''
-    Function to perform SVD on q_matrix
-    Plot singular values and reconstruct Q_mat
-    '''
-    #Find SVD and plot singular values
-    u, s, vt = np.linalg.svd(q_mat, full_matrices=True)
-    logging.info("SVD of Q-matrix: U shape: {}, S shape: {}, Vt shape: {}".format(u.shape, s.shape, vt.shape))
-
-    # plt.figure(figsize=(6,2))
-    # plt.plot(s, '*', alpha=2)
-    # plt.title("Singular Values")
-    # plt.show()
-
-    #Use k-largest singular values to reconstruct approximation
-    s_2 = s.copy()
-    s_2[k:] = 0
-    q_approx = u.dot(np.diag(s_2)).dot(vt)   
-
-    return q_approx  
-
 #Import Datasets
 def importData(experts_filename, tasks_filename, numExperts=1000, exp_len=2, task_len=4):
     with open(experts_filename, 'r') as f:
@@ -440,85 +375,6 @@ def importGraphData(filename, expert_indices):
 
     return edgeWeightMatrix
 
-# Reduce to 2D using SVD
-def reduce_embeddings_svd(embeddings, num_components=2):
-    # SVD
-    # svd = TruncatedSVD(n_components=num_components)
-    # embeddings_2d = svd.fit_transform(embeddings)
-
-    # Initialize UMAP to reduce data to 2 dimensions
-    # umap_model = umap.UMAP(n_components=num_components, random_state=42)
-    # embeddings_2d = umap_model.fit_transform(embeddings)
-
-    # tSNE
-    embeddings_2d = TSNE(n_components=num_components, random_state=42).fit_transform(embeddings)
-
-    return embeddings_2d
-
-# Visualize the 2D embeddings
-def visualize_embeddings(embeddings_2d, labels=None, title="Node Embeddings"):
-    plt.figure(figsize=(6, 4))
-    plt.scatter(embeddings_2d[:, 0], embeddings_2d[:, 1], c=labels, cmap='viridis', s=50, alpha=0.7)
-    plt.colorbar(label="Node Labels" if labels is not None else "Node")
-    plt.title(title)
-    plt.xlabel("SVD Component 1")
-    plt.ylabel("SVD Component 2")
-    plt.grid(alpha=0.3)
-    plt.show()
-
-
-# Visualize the 2D embeddings
-def visualize_embeddings_skill_expert(skill_embeddings_2d, exp_embeddings_2d, skill_labels, exp_labels, expert_with_skills,
-                                      skill_emb_notin_task, exp_emb_notin_task, exp_relevant_indices, exp_not_relevant_indices, exp_costs,
-                                      title="Node Embeddings"):
-    '''
-    Plot GNN node embeddings
-    skill_embeddings_2d: node embeddings of skills in task
-    exp_embeddings_2d: node embeddings of experts with relevant skill
-
-    skill_emb_notin_task: node embeddings of skills not task
-    exp_emb_notin_task: node embeddings of experts with no relevant skill
-    '''
-    m = len(skill_labels)
-    fig = plt.figure(figsize=(6, 4))
-    ax = fig.add_subplot() 
-
-    #Skill Embeddings
-    ax.scatter(skill_embeddings_2d[:, 0][:m], skill_embeddings_2d[:, 1][:m], c='green', marker='s', s=75, alpha=0.75, label='Task skill')
-    #Expert Embeddings
-    sc = ax.scatter(skill_embeddings_2d[:, 0][m:], skill_embeddings_2d[:, 1][m:], c=np.array(exp_costs)[exp_labels], 
-                     cmap='magma', marker='^', s=65, alpha=0.75, label='Relevant expert')
-    ax.scatter(skill_emb_notin_task[:, 0], skill_emb_notin_task[:, 1], c='grey', s=20, alpha=0.25, label='Other skill/expert')
-    cbar = fig.colorbar(sc, label="Expert Cost", ax=ax)
-
-    cbar.ax.tick_params(labelsize=14)  # Adjust tick font size
-    cbar.set_label("Expert Cost", fontsize=15)  # Adjust label font size
-
-    ax.set_xlabel('t-SNE Dimension 1', fontsize=15)
-    ax.set_ylabel('t-SNE Dimension 2', fontsize=15)
-    
-    # for i, (xi, yi) in enumerate(zip(skill_embeddings_2d[:, 0][:m], skill_embeddings_2d[:, 1][:m])):
-    #     plt.annotate(str(skill_labels[i]), (xi, yi), textcoords="offset points", xytext=(5,5), ha='center', fontsize=12)
-    
-    # for i, (xi, yi) in enumerate(zip(skill_embeddings_2d[:, 0][m:], skill_embeddings_2d[:, 1][m:])):
-    #     plt.annotate(str(expert_with_skills[i]), (xi, yi), textcoords="offset points", xytext=(5,5), ha='center', fontsize=10)
-    # plt.title(title, fontsize=12)
-    plt.grid(alpha=0.4)
-    # Create a common legend outside the subplots
-    handles, labels = ax.get_legend_handles_labels()
-    fig.legend(handles, labels,  loc='upper center', bbox_to_anchor=(0.5, 1.0), fontsize=11, ncol=3, markerscale=1)
-    plt.show()
-
-    # pcm = ax2.scatter(exp_embeddings_2d[:, 0], exp_embeddings_2d[:, 1], c=exp_labels, cmap='magma', s=45, alpha=0.75)
-    # pcm_2 = ax2.scatter(exp_emb_notin_task[:, 0], exp_emb_notin_task[:, 1], c='grey', s=30, alpha=0.4)
-    # # fig.colorbar(pcm, label="Expert Index", ax=ax2)        
-    # ax2.set_xlabel('SVD Component 1', fontsize=12)
-    # ax2.set_ylabel('SVD Component 2', fontsize=12)
-    # for i, (xi, yi) in enumerate(zip(exp_embeddings_2d[:, 0], exp_embeddings_2d[:, 1])):
-    #     ax2.annotate(str(expert_with_skills[i]), (xi, yi), textcoords="offset points", xytext=(5,5), ha='center', fontsize=9)
-    
-    # ax2.grid(alpha=0.3)
-    return None
 
 #Plot pairwise jaccard similarity histogram between task pairs
 def plot_pairwise_jaccard_distribution(task_list):
@@ -542,6 +398,7 @@ def plot_pairwise_jaccard_distribution(task_list):
     plt.show()
 
     return None
+
 
 def import_pickled_datasets(dataset_name, dataset_num):
     '''

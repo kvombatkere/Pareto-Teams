@@ -8,22 +8,21 @@ This repository provides a Python implementation of algorithms for approximating
 In many data mining applications—including recommender systems, influence maximization, and team formation—the goal is to select a subset of elements (e.g., items, nodes, or experts) that maximizes a monotone submodular utility function while minimizing a cost function.
 Classical approaches impose cardinality or knapsack constraints, or combine utility and cost into a single weighted objective. However, these approaches require fixing a tradeoff in advance and return only a single solution, providing limited insight into the space of achievable utility–cost tradeoffs.
 
-In contrast, this work studies how to compute **representative sets of solutions** that expose different tradeoffs between utility and cost. We introduce $(\alpha_1,\alpha_2)$-approximate Pareto frontiers that provably approximate the achievable tradeoffs between submodular utility $f$ and cost $c$.
-We formalize the **$\texttt{Pareto}$-$(f,c)$ problem** and develop efficient algorithms for multiple settings arising from different combinations of submodular utility and cost functions. Experiments on real-world datasets demonstrate that our algorithms efficiently compute high-quality approximate Pareto frontiers in practice.
+In contrast, this work studies how to compute representative sets of solutions that expose different tradeoffs between utility and cost. We introduce $(\alpha_1,\alpha_2)$-approximate Pareto frontiers that provably approximate the achievable tradeoffs between submodular utility $f$ and cost $c$.
+We formalize the $\texttt{Pareto}-(f,c)$ and develop efficient algorithms for multiple settings arising from different combinations of submodular utility and cost functions. Experiments on real-world datasets demonstrate that our algorithms efficiently compute high-quality approximate Pareto frontiers in practice.
 
 
-## The $\texttt{Pareto}$-$(f,c)$ Problem
+## The $\texttt{Pareto}-(f,c)$ Problem
 
 Let $\mathcal{V}$ be a ground set of $n$ items, a non-negative monotone submodular function  
-$f : 2^{\mathcal{V}} \rightarrow \mathbb{R}_{\ge 0}$ to be maximized, and a non-negative cost function  
-$c : 2^{\mathcal{V}} \rightarrow \mathbb{R}_{\ge 0}$ to be minimized.
+$f$ to be maximized, and a non-negative cost function $c$ to be minimized.
 
 The goal is to compute a polynomial-size set of solutions $\mathcal{S}' \subseteq 2^{\mathcal{V}}$ that forms an $(\alpha_1,\alpha_2)$-approximate Pareto frontier, meaning it approximately captures the optimal tradeoffs between utility $f$ and cost $c$.
 
 
 ## Real-World Applications
 
-We map the $\texttt{Pareto}$-$(f,c)$ problem to real-world applications in team formation, influence maximization and  recommender systems; we provide definitions of $\mathcal{V}, f$, and $c$, for each case.
+We map the $\texttt{Pareto}-(f,c)$ problem to real-world applications in team formation, influence maximization and  recommender systems; we provide definitions of $\mathcal{V}, f$, and $c$, for each case.
 
 ### Team Formation
 
@@ -70,32 +69,26 @@ $c(Q) = \max_{i,j \in Q} d(i,j)$, encouraging well-coordinated seed sets.
 
 
 ## Repository Structure
-```
-├── code/
-    ├── pareto-cardinality/    # Cardinality Cost
-        ├── paretoCardinality*.py
-        ├── pareto-cardinality-*.ipynb
 
-    ├── pareto-graph/          # Diameter Cost
-        ├── paretoGraph*.py
-        ├── pareto-graph-*.ipynb
+The repository is organized into modular components corresponding to different cost models, datasets, and experimental pipelines. Each folder contains both reusable Python implementations (`.py`) and interactive experiment notebooks (`.ipynb`).
 
-    ├── pareto-knapsack/       # Knapsack Cost
-        ├── paretoKnapsack*.py
-        ├── pareto-knapsack-*.ipynb
+- **`code/`** — Core implementations of Pareto frontier algorithms for different cost functions:
+  - `pareto-cardinality/` — Algorithms and notebooks for cardinality cost constraints.
+  - `pareto-graph/` — Algorithms and notebooks for diameter (graph-based coordination) costs.
+  - `pareto-knapsack/` — Algorithms and notebooks for knapsack (linear) cost functions.
 
-├── datasets/                   
-    ├── pickled_data/          # processed datasets
-    ├── raw_data/  
-    preprocess_*.ipynb         # pre-processing scripts
+- **`datasets/`** — Datasets used in experiments:
+  - `pickled_data/` contains preprocessed datasets for efficient loading.
+  - `preprocess_*.ipynb` notebooks provide full preprocessing pipelines for reproducibility.
 
-├── figures/                   # Saved figures for paper
+- **`figures/`** — Generated figures and plots used in the paper.
 
-├── README.md                  # This file
-├── requirements.txt           # Package requirements
-├── setup_env.sh               # Bash script to set up environment
-├── utils.py                   # Python utilities
-```
+- **Top-level files**
+  - `utils.py` — Shared utility functions used across algorithms and experiments.
+  - `requirements.txt` — Python package dependencies.
+  - `setup_env.sh` — Script to automatically create the conda environment.
+  - `README.md` — Documentation and usage instructions.
+
 
 ## Environment Setup
 Run `./setup_env.sh` to create a new conda environment `pareto_env` with `Python 3.13` and install the required packages specified in `requirements.txt`.
