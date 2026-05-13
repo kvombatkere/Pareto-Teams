@@ -1,6 +1,7 @@
 import time, pickle
 import random
 from heapq import heappop, heappush, heapify
+from typing import List, Tuple
 import numpy as np
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
@@ -785,6 +786,211 @@ class paretoKnapsackTeams():
         logging.debug("Coverage Linear Runtime = {:.2f} seconds".format(runTime))
 
         return prunedBudgets, prunedCoverages, cost_coverage_map, runTime
+
+    
+    
+    def ParetoPoint(self, budget):
+        '''
+        Compute a Pareto optimal point for the given budget.
+        Uses 1-Guess Greedy Plus to find the best expert team within budget.
+        
+        ARGS:
+            budget: The budget constraint
+            
+        RETURN:
+            experts: List of selected experts
+            coverage: Coverage value achieved
+        '''
+        # Use 1-Guess Greedy Plus to find best solution within budget
+        best_experts, best_skills, best_coverage, best_cost, _ = self.oneGuessGreedyPlus()
+        
+        # If the solution fits within budget, return it
+        if best_cost <= budget:
+            return best_experts, best_coverage
+        
+        # Otherwise, greedily select experts within budget
+        solution_experts = []
+        solution_skills = set()
+        curr_cost = 0
+        
+        expert_scores = []
+        for i, expert_i in enumerate(self.experts):
+            if self.costs[i] > 0:
+                expert_cov = len(set(expert_i).intersection(self.task_skills)) / len(self.task)
+                expert_scores.append((expert_cov / self.costs[i], i))
+        
+        expert_scores.sort(key=lambda x: x[0], reverse=True)
+        
+        for _, idx in expert_scores:
+            if curr_cost + self.costs[idx] <= budget:
+                solution_experts.append(self.experts[idx])
+                solution_skills = solution_skills.union(set(self.experts[idx]))
+                curr_cost += self.costs[idx]
+        
+        coverage = len(solution_skills.intersection(self.task_skills)) / len(self.task) if len(self.task) > 0 else 0
+        return solution_experts, coverage
+
+
+    def Pass(self, l, r, delta_val):
+        '''
+        Test if the interval [l, r] passes the certification criterion.
+        Checks if the chord between (l, v_l) and (r, v_r) approximately covers 
+        the value at the midpoint.
+        
+        ARGS:
+            l: Left endpoint budget
+            r: Right endpoint budget
+            delta_val: Tolerance for certification
+            
+        RETURN:
+            passes: True if interval passes the test, False otherwise
+        '''
+        # Compute Pareto points at endpoints
+        S_l, v_l = self.ParetoPoint(l)
+        S_r, v_r = self.ParetoPoint(r)
+        
+        # Compute midpoint (arithmetic midpoint)
+        B_m = (l + r) / 2.0
+        S_m, v_m = self.ParetoPoint(B_m)
+        
+        # Compute chord value at midpoint
+        v_L_m = ((r - B_m) / (r - l)) * v_l + ((B_m - l) / (r - l)) * v_r
+        
+        # Return True if chord value is at least (1-delta) times actual value
+        passes = v_L_m >= (1 - delta_val) * v_m
+        logging.debug("Pass(l={}, r={}): v_L_m={:.4f}, (1-delta)*v_m={:.4f}, result={}".format(
+            l, r, v_L_m, (1 - delta_val) * v_m, passes))
+        return passes
+
+
+    def exponentialSearchRepresentativeIntervals(self, B_min, B_max, epsilon_val=0.1, delta_val=0.1):
+        '''
+        Exponential Search for Representative Pareto Intervals
+        
+        Finds a set of representative intervals that approximate the Pareto frontier
+        using exponential search and binary search.
+        
+        Algorithm:
+        - Maintains a left endpoint l, initially B_min
+        - For each iteration: exponentially searches for the largest r such that 
+          Pass(l, r) is True using steps of r(1+epsilon)^2
+        - If last exponential step passes, includes it; otherwise uses binary search 
+          between the last passing r_prev and failing r
+        - Records the Pareto point at l and interval [l, r']
+        - Advances l to r' and repeats until l >= B_max
+        
+        ARGS:
+            B_min: Minimum budget
+            B_max: Maximum budget
+            epsilon_val: Grid parameter, epsilon > 0 (default 0.1)
+            delta_val: Tolerance, delta in (0,1) (default 0.1)
+            
+        RETURN:
+            P_R: List of (experts, interval) tuples representing the Pareto frontier
+            metadata: Dictionary with algorithm details
+        '''
+        startTime = time.perf_counter()
+        
+        P_R = []  # Representative Pareto intervals
+        l = B_min
+        
+        def BinarySearchLargestPassing(l_left, l_right, r_right):
+            '''
+            Binary search for largest budget r' in [l_right, r_right] such that 
+            Pass(l_left, r') returns True.
+            
+            ARGS:
+                l_left: Left endpoint (fixed during binary search)
+                l_right: Lower bound for binary search
+                r_right: Upper bound for binary search
+                
+            RETURN:
+                r_prime: Largest budget in [l_right, r_right] where Pass(l_left, r') is True
+            '''
+            lo = l_right
+            hi = r_right
+            
+            # Floating-point binary search
+            while hi - lo > 1e-6:  # Tolerance for convergence
+                mid = (lo + hi) / 2.0
+                if self.Pass(l_left, mid, delta_val):
+                    lo = mid
+                else:
+                    hi = mid
+            
+            return lo
+        
+        iteration = 0
+        while l < B_max:
+            iteration += 1
+            logging.info("Exponential Search Iteration {}: l={}".format(iteration, l))
+            
+            # Initialize r = l(1+epsilon)^2
+            r = min(l * ((1 + epsilon_val) ** 2), B_max)
+            r_prev = l
+            
+            # Exponential search phase: keep doubling r while Pass(l, r) is True
+            while self.Pass(l, r, delta_val):
+                logging.debug("Exponential search: Pass(l={}, r={}) = True, advancing r".format(l, r))
+                r_prev = r
+                r_uncapped = r * ((1 + epsilon_val) ** 2)
+                
+                # If next step would exceed B_max, stop expanding
+                if r_uncapped >= B_max:
+                    r = B_max  # Mark that we've hit the budget limit
+                    break
+                r = r_uncapped
+            
+            # Determine final r'
+            if r >= B_max:
+                # Exponential search reached budget limit, don't expand further
+                r_prime = r_prev
+                logging.debug("Exponential search reached B_max, using r_prev={}".format(r_prev))
+            elif self.Pass(l, r, delta_val):
+                # Last exponential step passed
+                r_prime = r
+                logging.debug("Pass(l={}, r={}) = True, setting r'={}".format(l, r, r_prime))
+            else:
+                # Last exponential step failed: binary search between r_prev and r
+                r_prime = BinarySearchLargestPassing(l, r_prev, r)
+                logging.debug("Pass(l={}, r={}) = False, binary search between {} and {} returned r'={}".format(
+                    l, r, r_prev, r, r_prime))
+            
+            # Get Pareto point at l
+            R_l, v_l = self.ParetoPoint(l)
+            
+            # Check if full coverage achieved at left endpoint
+            if v_l >= 1.0 - 1e-6:
+                # Add final interval and stop
+                P_R.append((R_l, (l, r_prime)))
+                logging.info("Added interval: [l={:.2f}, r'={:.2f}], v_l={:.3f}, experts={}".format(
+                    l, r_prime, v_l, len(R_l)))
+                logging.info("Full coverage (v_l={:.4f}) achieved at l={:.2f}, stopping search".format(v_l, l))
+                break
+            
+            # Add to representative intervals
+            P_R.append((R_l, (l, r_prime)))
+            logging.info("Added interval: [l={:.2f}, r'={:.2f}], v_l={:.3f}, experts={}".format(
+                l, r_prime, v_l, len(R_l)))
+            
+            # Update l for next iteration
+            l = r_prime
+        
+        runTime = time.perf_counter() - startTime
+        
+        metadata = {
+            'epsilon': epsilon_val,
+            'delta': delta_val,
+            'B_min': B_min,
+            'B_max': B_max,
+            'num_intervals': len(P_R),
+            'runtime': runTime
+        }
+        
+        logging.info("Exponential Search Complete: {} intervals found, Runtime={:.2f}s".format(
+            len(P_R), runTime))
+        
+        return P_R, metadata
     
 
 def import_pickled_datasets(dataset_name, dataset_num):
