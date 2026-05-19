@@ -796,3 +796,101 @@ class paretoKnapsackRestaurants():
         total_runtime = float(cost_runtime) + float(cov_runtime)
 
         return pruned_costs, pruned_objectives, total_runtime
+
+
+    def ParetoPoint(items, costs, simMatrix, budget):
+        """
+        Compute a budget-specific Pareto point by instantiating a new
+        paretoKnapsackRestaurants object with the requested budget.
+        Returns selected item indices and the objective value.
+        """
+        if budget <= 0:
+            return [], 0.0
+
+        budget_instance = paretoKnapsackRestaurants(n_items=items, costs=costs, simMatrix=simMatrix, budget=budget)
+        best_items, best_objective, best_cost, _ = budget_instance.oneGuessGreedyPlus()
+        return best_items, best_objective
+
+
+    def Pass(l, r, delta_val, items, costs, simMatrix):
+        """
+        Test if the interval [l, r] passes the chord certification criterion
+        using raw objective values.
+        """
+        _, v_l = ParetoPoint(items, costs, simMatrix, l)
+        _, v_r = ParetoPoint(items, costs, simMatrix, r)
+        _, v_m = ParetoPoint(items, costs, simMatrix, (l + r) / 2.0)
+
+        v_L_m = ((r - ((l + r) / 2.0)) / (r - l)) * v_l + ((((l + r) / 2.0) - l) / (r - l)) * v_r
+        return v_L_m >= (1 - delta_val) * v_m
+
+
+    def exponentialSearchRepresentativeIntervals(items, costs, simMatrix, B_min, B_max, epsilon_val=0.1, delta_val=0.1):
+        """
+        Exponential search for representative Pareto intervals using budget-specific
+        Pareto points (for restaurant recommendations).
+        Returns list of (solution_items, (l, r_prime)) and metadata.
+        """
+        startTime = time.perf_counter()
+        P_R = []
+        l = B_min
+
+        def binary_search_largest_passing(l_left, l_right, r_right):
+            lo, hi = l_right, r_right
+            while hi - lo > 1e-6:
+                mid = (lo + hi) / 2.0
+                if Pass(l_left, mid, delta_val, items, costs, simMatrix):
+                    lo = mid
+                else:
+                    hi = mid
+            return lo
+
+        iteration = 0
+        while l < B_max:
+            iteration += 1
+            logging.info("Exponential Search Iteration {}: l={}".format(iteration, l))
+
+            r = min(l * ((1 + epsilon_val) ** 2), B_max)
+            r_prev = l
+
+            while Pass(l, r, delta_val, items, costs, simMatrix):
+                logging.debug("Exponential search: Pass(l={}, r={}) = True, advancing r".format(l, r))
+                r_prev = r
+                r_uncapped = r * ((1 + epsilon_val) ** 2)
+                if r_uncapped >= B_max:
+                    r = B_max
+                    break
+                r = r_uncapped
+
+            if r >= B_max:
+                r_prime = r_prev
+                logging.debug("Exponential search reached B_max, using r_prev={}".format(r_prev))
+            elif Pass(l, r, delta_val, items, costs, simMatrix):
+                r_prime = r
+                logging.debug("Pass(l={}, r={}) = True, setting r'={}".format(l, r, r_prime))
+            else:
+                r_prime = binary_search_largest_passing(l, r_prev, r)
+                logging.debug("Pass(l={}, r={}) = False, binary search returned r'={}".format(l, r, r_prime))
+
+            R_l, v_l = ParetoPoint(items, costs, simMatrix, l)
+            if v_l >= 1.0 - 1e-6:
+                P_R.append((R_l, (l, r_prime)))
+                logging.info("Added interval: [l={:.2f}, r'={:.2f}], v_l={:.3f}, items={}".format(l, r_prime, v_l, len(R_l)))
+                logging.info("Full objective achieved at l={:.2f}, stopping search".format(l))
+                break
+
+            P_R.append((R_l, (l, r_prime)))
+            logging.info("Added interval: [l={:.2f}, r'={:.2f}], v_l={:.3f}, items={}".format(l, r_prime, v_l, len(R_l)))
+            l = int(r_prime) + 1
+
+        runTime = time.perf_counter() - startTime
+        metadata = {
+            "epsilon": epsilon_val,
+            "delta": delta_val,
+            "B_min": B_min,
+            "B_max": B_max,
+            "num_intervals": len(P_R),
+            "runtime": runTime,
+        }
+        logging.info("Exponential Search Complete: {} intervals found, Runtime={:.2f}s".format(len(P_R), runTime))
+        return P_R, metadata
