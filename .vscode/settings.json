@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^cd /Users/kvombat/Documents/Research/Pareto-Teams && python3 - <<'PY'\nimport json\nfrom pathlib import Path\npath = Path\\('code/pareto-graph/pareto-graph-teams\\.ipynb'\\)\nnb = json\\.loads\\(path\\.read_text\\(\\)\\)\nfunc_cell = nb\\['cells'\\]\\[4\\]\nfor i, line in enumerate\\(func_cell\\['source'\\]\\[:120\\]\\):\n    if any\\(term in line for term in \\['plot_algo_names', 'all_coverages', 'all_runtimes', 'task_coverages', 'task_runtimes', 'ParetoSummary', 'computeParetoDiameterPoints', 'exponentialSearchRepresentativeIntervalsDiameter'\\]\\):\n        print\\(i, line\\.rstrip\\(\\)\\)\n\nprint\\('\\\\nAround prune block:'\\)\nfor i, line in enumerate\\(func_cell\\['source'\\]\\):\n    if i > 140 and i < 190:\n        print\\(i, line\\.rstrip\\(\\)\\)\nPY$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
